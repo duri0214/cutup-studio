@@ -4,6 +4,8 @@
 
 初期実証の範囲ではローカル LLM、FFmpeg、DB、素材の自動解析を使いません。素材の本体は一切書き出さず、manifest には素材ルートからの相対パスと時間範囲だけを記録します。
 
+操作画面は `vj-copilot` と同じ、ダークテーマとミク色のアクセントを使うライブ操作向けの構成です。候補はカードから選択し、右側の `COMPOSITION STAGE` で確定順を確認します。
+
 ## 起動
 
 Rust を導入した状態で次を実行します。
@@ -39,9 +41,23 @@ cargo run
 
 短い自然文 `テッカマンを導入に置き、驚きの反応でつなぐ` も、この最小実証で扱う二つのパターンとして分解できます。再現性を重視する用途では、上記の一行形式を推奨します。
 
+## 構成
+
+`vj-copilot` の Rust 構成をベースに、役割を次のように分けています。
+
+```text
+src/
+├─ domain/  # カタログ・候補・manifestの値と検索/構成サービス
+├─ infra/   # catalog JSON と manifest JSON のファイル入出力
+└─ ui/      # eframe画面と VJ 風テーマ
+```
+
+リポジトリ運用・Rust・DDD・テストのルールと、Issue／レビュー／ブランチ整理スキルは `.codex/` にあります。
+
 ## 検証
 
 ```powershell
 cargo test
-cargo fmt --check
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
 ```
