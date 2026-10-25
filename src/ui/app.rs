@@ -535,7 +535,10 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
                     );
                 }
             });
-            ui.label(RichText::new(&candidate.segment_id).size(12.0).strong());
+            ui.add(
+                egui::Label::new(RichText::new(&candidate.segment_id).size(12.0).strong())
+                    .truncate(),
+            );
             ui.label(
                 RichText::new(format!("{}–{} ms", candidate.start_ms, candidate.end_ms))
                     .monospace()
@@ -550,10 +553,13 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
                 )
                 .truncate(),
             );
-            ui.label(
-                RichText::new(candidate.reasons.join(" / "))
-                    .size(10.0)
-                    .color(theme::ACCENT),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(candidate.reasons.join(" / "))
+                        .size(10.0)
+                        .color(theme::ACCENT),
+                )
+                .truncate(),
             );
         })
         .response;

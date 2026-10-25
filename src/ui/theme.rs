@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    Frame, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    FontTweak, Frame, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
 pub const PANEL: Color32 = Color32::from_rgb(23, 29, 38);
@@ -67,9 +67,13 @@ fn install_japanese_font(context: &Context) {
 
     let mut fonts = FontDefinitions::default();
     let font_name = "yu-gothic".to_owned();
-    fonts
-        .font_data
-        .insert(font_name.clone(), Arc::new(FontData::from_owned(font_data)));
+    fonts.font_data.insert(
+        font_name.clone(),
+        Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
+            y_offset: 2.0_f32,
+            ..Default::default()
+        })),
+    );
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts
             .families
