@@ -14,6 +14,10 @@ pub enum CatalogFileError {
         path: String,
         source: serde_json::Error,
     },
+    #[error(
+        "{path} は出力済みの manifest です。素材を探すには catalog JSON を選ぶか、組み込みデモを使ってください"
+    )]
+    ManifestSelected { path: String },
     #[error("素材ルートは存在するディレクトリを指定してください: {0}")]
     InvalidMaterialRoot(String),
     #[error(transparent)]
@@ -33,16 +37,22 @@ pub fn load_catalog(path: &Path) -> Result<Catalog, CatalogFileError> {
         path: display.clone(),
         source,
     })?;
-    let catalog =
-        serde_json::from_str::<Catalog>(&source).map_err(|source| CatalogFileError::Decode {
-            path: display,
-            source,
-        })?;
+    let catalog = decode_catalog(display, &source)?;
     if !Path::new(&catalog.material_root).is_dir() {
         return Err(CatalogFileError::InvalidMaterialRoot(catalog.material_root));
     }
     catalog.validate_metadata()?;
     Ok(catalog)
+}
+
+fn decode_catalog(path: String, source: &str) -> Result<Catalog, CatalogFileError> {
+    match serde_json::from_str::<Catalog>(source) {
+        Ok(catalog) => Ok(catalog),
+        Err(_) if serde_json::from_str::<Manifest>(source).is_ok() => {
+            Err(CatalogFileError::ManifestSelected { path })
+        }
+        Err(source) => Err(CatalogFileError::Decode { path, source }),
+    }
 }
 
 pub fn save_manifest(path: &Path, manifest: &Manifest) -> Result<(), CatalogFileError> {
@@ -51,4 +61,25 @@ pub fn save_manifest(path: &Path, manifest: &Manifest) -> Result<(), CatalogFile
         path: path.display().to_string(),
         source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_is_reported_as_the_wrong_input_type() {
+        let manifest = Manifest {
+            schema_version: 1,
+            guide_text: "導入: テスト".into(),
+            material_root: "demo".into(),
+            entries: Vec::new(),
+        };
+        let source = serde_json::to_string(&manifest).unwrap();
+
+        assert!(matches!(
+            decode_catalog("composition-manifest.json".into(), &source),
+            Err(CatalogFileError::ManifestSelected { .. })
+        ));
+    }
 }

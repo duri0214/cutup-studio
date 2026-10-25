@@ -164,7 +164,7 @@ impl StudioApp {
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new("OPEN YOUR CATALOG JSON")
+                        RichText::new("OPEN SOURCE CATALOG JSON")
                             .strong()
                             .color(theme::BACKGROUND),
                     )
@@ -178,6 +178,11 @@ impl StudioApp {
             if ui.button("USE DEMO CATALOG").clicked() {
                 self.use_demo_catalog();
             }
+            ui.label(
+                RichText::new("保存した composition-manifest.json はここには読み込めません。")
+                    .size(10.0)
+                    .color(theme::MUTED),
+            );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     theme::badge(
