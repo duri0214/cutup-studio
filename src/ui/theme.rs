@@ -109,6 +109,14 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         });
 }
 
+pub fn role_badge(ui: &mut Ui, text: &str, color: Color32) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(48.0, 24.0),
+        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        |ui| badge(ui, text, color),
+    );
+}
+
 pub fn badge_button(ui: &mut Ui, text: &str, color: Color32) -> Response {
     ui.add(
         egui::Button::new(RichText::new(text).size(10.0).strong().color(color))

@@ -287,10 +287,12 @@ impl StudioApp {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    theme::badge(ui, &guide_input.role, theme::ACCENT);
+                    theme::role_badge(ui, &guide_input.role, theme::ACCENT);
                     ui.add(
                         egui::TextEdit::singleline(&mut guide_input.query)
                             .desired_width(330.0)
+                            .min_size(Vec2::new(330.0, 28.0))
+                            .margin(egui::Margin::symmetric(8, 4))
                             .hint_text("探したい語句・タグ"),
                     );
                     if can_remove
