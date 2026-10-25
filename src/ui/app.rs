@@ -193,7 +193,7 @@ impl StudioApp {
             theme::caption(ui, "01 / MATERIAL CATALOG");
             ui.label(
                 RichText::new(
-                    "素材フォルダと候補に使う素材クリップを定義した catalog JSON を開きます。",
+                    "実素材を使う場合は、素材フォルダと素材クリップを定義した catalog JSON を開きます。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
