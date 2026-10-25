@@ -168,9 +168,9 @@ impl StudioApp {
             if theme::action_button(
                 ui,
                 theme::ActionIcon::Open,
-                "OPEN CATALOG JSON",
+                "OPEN",
                 false,
-                Vec2::new(230.0, 32.0),
+                Vec2::new(106.0, 32.0),
             )
             .clicked()
             {
@@ -228,6 +228,7 @@ impl StudioApp {
             ui.add(
                 egui::TextEdit::multiline(&mut self.guide_text)
                     .desired_rows(4)
+                    .margin(egui::Vec2::splat(8.0))
                     .font(egui::TextStyle::Monospace),
             );
             if theme::action_button(
