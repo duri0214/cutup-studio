@@ -28,6 +28,7 @@ pub struct StudioApp {
     plan: Option<Plan>,
     selections: BTreeMap<String, String>,
     active_slot: Option<usize>,
+    dragged_guide_index: Option<usize>,
     status: String,
 }
 
@@ -41,6 +42,7 @@ impl StudioApp {
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
+            dragged_guide_index: None,
             status: "READY — GUIDE を生成して候補を確認できます。".into(),
         }
     }
@@ -61,6 +63,7 @@ impl StudioApp {
                 self.plan = None;
                 self.selections.clear();
                 self.active_slot = None;
+                self.dragged_guide_index = None;
                 self.status = "CATALOG READY — ガイドから候補を生成できます。".into();
             }
             Err(error) => self.status = format!("CATALOG ERROR — {error}"),
@@ -74,6 +77,7 @@ impl StudioApp {
         self.plan = None;
         self.selections.clear();
         self.active_slot = None;
+        self.dragged_guide_index = None;
         self.status = "READY — GUIDE を生成して候補を確認できます。".into();
     }
 
@@ -278,21 +282,19 @@ impl StudioApp {
             });
             ui.add_space(4.0);
             let mut remove_index = None;
+            let mut drag_started = None;
+            let mut drag_stopped = false;
+            let mut drop_target = None;
+            let dragged_index = self.dragged_guide_index;
             let can_remove = self.guide_inputs.len() > 1;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.scope(|ui| {
-                        ui.spacing_mut().interact_size.y = 24.0;
-                        ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
-                        egui::ComboBox::from_id_salt(("guide-role", index))
-                            .selected_text(&guide_input.role)
-                            .width(92.0)
-                            .show_ui(ui, |ui| {
-                                for role in &available_roles {
-                                    ui.selectable_value(&mut guide_input.role, role.clone(), role);
-                                }
-                            });
-                    });
+                let row = ui.horizontal(|ui| {
+                    let drag_response = theme::drag_handle(ui);
+                    if drag_response.drag_started() {
+                        drag_started = Some(index);
+                    }
+                    drag_stopped |= drag_response.drag_stopped();
+                    theme::badge(ui, &guide_input.role, theme::ACCENT);
                     ui.add(
                         egui::TextEdit::singleline(&mut guide_input.query)
                             .desired_width(330.0)
@@ -305,9 +307,36 @@ impl StudioApp {
                         remove_index = Some(index);
                     }
                 });
+                if let Some(dragged_index) = dragged_index
+                    && dragged_index != index
+                    && ui.input(|input| {
+                        input
+                            .pointer
+                            .interact_pos()
+                            .is_some_and(|position| row.response.rect.contains(position))
+                    })
+                {
+                    drop_target = Some(index);
+                    ui.painter().line_segment(
+                        [row.response.rect.left_top(), row.response.rect.right_top()],
+                        Stroke::new(2.0_f32, theme::ACCENT),
+                    );
+                }
             }
             if let Some(index) = remove_index {
                 self.guide_inputs.remove(index);
+            }
+            if let Some(index) = drag_started {
+                self.dragged_guide_index = Some(index);
+            }
+            if drag_stopped {
+                if let (Some(from), Some(to)) = (self.dragged_guide_index, drop_target)
+                    && from != to
+                {
+                    let guide_input = self.guide_inputs.remove(from);
+                    self.guide_inputs.insert(to, guide_input);
+                }
+                self.dragged_guide_index = None;
             }
             if let Some(role) = role_to_add {
                 self.guide_inputs.push(GuideInput {

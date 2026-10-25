@@ -128,6 +128,25 @@ pub fn icon_button(ui: &mut Ui, icon: ActionIcon, tooltip: &str) -> Response {
     response.on_hover_text(tooltip)
 }
 
+pub fn drag_handle(ui: &mut Ui) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 24.0), Sense::drag());
+    let color = if response.hovered() || response.dragged() {
+        ACCENT
+    } else {
+        MUTED
+    };
+    for x in [-3.0_f32, 3.0_f32] {
+        for y in [-5.0_f32, 0.0_f32, 5.0_f32] {
+            ui.painter().circle_filled(
+                Pos2::new(rect.center().x + x, rect.center().y + y),
+                1.3,
+                color,
+            );
+        }
+    }
+    response.on_hover_text("ドラッグして順番を入れ替え")
+}
+
 pub fn action_button(
     ui: &mut Ui,
     icon: ActionIcon,
