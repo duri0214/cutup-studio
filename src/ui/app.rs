@@ -5,12 +5,15 @@ use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 use crate::{
     domain::{
         service::{create_plan, manifest_from_plan},
-        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, SlotPlan},
+        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment, SlotPlan},
     },
     infra::catalog_file::{load_catalog, save_manifest},
 };
 
 use super::theme;
+
+const DEMO_GUIDE: &str = "導入: テッカマン\nつなぎ: 驚き 反応";
+const DEMO_CATALOG_LABEL: &str = "組み込みデモ — 素材なしで候補選択と manifest 保存を試せます";
 
 pub struct StudioApp {
     catalog: Option<Catalog>,
@@ -26,13 +29,13 @@ impl StudioApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
         theme::install(&creation_context.egui_ctx);
         Self {
-            catalog: None,
+            catalog: Some(demo_catalog()),
             catalog_path: None,
-            guide_text: "導入: テッカマン\nつなぎ: 驚き 反応".into(),
+            guide_text: DEMO_GUIDE.into(),
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
-            status: "CATALOG JSON を開いて、構成の設計図を入力してください。".into(),
+            status: "DEMO READY — 候補選択から manifest 保存まで試せます。".into(),
         }
     }
 
@@ -54,6 +57,16 @@ impl StudioApp {
             }
             Err(error) => self.status = format!("CATALOG ERROR — {error}"),
         }
+    }
+
+    fn use_demo_catalog(&mut self) {
+        self.catalog = Some(demo_catalog());
+        self.catalog_path = None;
+        self.guide_text = DEMO_GUIDE.into();
+        self.plan = None;
+        self.selections.clear();
+        self.active_slot = None;
+        self.status = "DEMO READY — 候補選択から manifest 保存まで試せます。".into();
     }
 
     fn build_plan(&mut self) {
@@ -143,7 +156,7 @@ impl StudioApp {
                 .catalog_path
                 .as_ref()
                 .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "catalog not loaded — 素材本体は参照のみ".into());
+                .unwrap_or_else(|| DEMO_CATALOG_LABEL.into());
             ui.add(
                 egui::Label::new(RichText::new(location).size(11.0).color(theme::MUTED)).truncate(),
             );
@@ -151,7 +164,7 @@ impl StudioApp {
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new("OPEN CATALOG JSON")
+                        RichText::new("OPEN YOUR CATALOG JSON")
                             .strong()
                             .color(theme::BACKGROUND),
                     )
@@ -161,6 +174,9 @@ impl StudioApp {
                 .clicked()
             {
                 self.open_catalog();
+            }
+            if ui.button("USE DEMO CATALOG").clicked() {
+                self.use_demo_catalog();
             }
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
@@ -403,6 +419,59 @@ impl eframe::App for StudioApp {
     }
 }
 
+fn demo_catalog() -> Catalog {
+    Catalog {
+        schema_version: SCHEMA_VERSION,
+        material_root: "組み込みデモ（素材ファイルなし）".into(),
+        segments: vec![
+            Segment {
+                id: "demo-tekkaman-intro".into(),
+                source_path: "demo/tekkaman-intro.mp4".into(),
+                start_ms: 1200,
+                end_ms: 4500,
+                transcript: "テッカマンが登場する導入シーン".into(),
+                keywords: vec!["テッカマン".into(), "登場".into()],
+                tags: vec!["導入".into(), "画".into()],
+                roles: vec!["導入".into()],
+                note: "動作確認用の仮想素材".into(),
+            },
+            Segment {
+                id: "demo-tekkaman-closeup".into(),
+                source_path: "demo/tekkaman-closeup.mp4".into(),
+                start_ms: 8000,
+                end_ms: 10500,
+                transcript: "テッカマンのクローズアップ".into(),
+                keywords: vec!["テッカマン".into(), "クローズアップ".into()],
+                tags: vec!["導入".into(), "画".into()],
+                roles: vec!["導入".into()],
+                note: "動作確認用の仮想素材".into(),
+            },
+            Segment {
+                id: "demo-surprised-reaction".into(),
+                source_path: "demo/surprised-reaction.mp4".into(),
+                start_ms: 8400,
+                end_ms: 10400,
+                transcript: "えっ、という驚きの反応".into(),
+                keywords: vec!["驚き".into(), "反応".into()],
+                tags: vec!["反応".into(), "つなぎ".into()],
+                roles: vec!["つなぎ".into()],
+                note: "動作確認用の仮想素材".into(),
+            },
+            Segment {
+                id: "demo-quick-reaction".into(),
+                source_path: "demo/quick-reaction.mp4".into(),
+                start_ms: 2000,
+                end_ms: 3600,
+                transcript: "短い驚きのリアクション".into(),
+                keywords: vec!["驚き".into(), "反応".into()],
+                tags: vec!["反応".into(), "つなぎ".into()],
+                roles: vec!["つなぎ".into()],
+                note: "動作確認用の仮想素材".into(),
+            },
+        ],
+    }
+}
+
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
     let response = Frame::new()
         .fill(if selected {
@@ -477,4 +546,20 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         );
     }
     response.clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_catalog_generates_candidates_for_the_default_guide() {
+        let catalog = demo_catalog();
+        catalog.validate_metadata().unwrap();
+
+        let plan = create_plan(&catalog, DEMO_GUIDE);
+
+        assert_eq!(plan.slots.len(), 2);
+        assert!(plan.slots.iter().all(|slot| !slot.candidates.is_empty()));
+    }
 }
