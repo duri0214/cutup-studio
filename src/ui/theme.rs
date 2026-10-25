@@ -19,6 +19,7 @@ pub enum ActionIcon {
     Generate,
     Save,
     Reset,
+    Delete,
 }
 
 pub fn install(context: &Context) {
@@ -101,6 +102,30 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(10.0).strong().color(color));
         });
+}
+
+pub fn badge_button(ui: &mut Ui, text: &str, color: Color32) -> Response {
+    ui.add(
+        egui::Button::new(RichText::new(text).size(10.0).strong().color(color))
+            .fill(color.gamma_multiply(0.12))
+            .stroke(Stroke::new(1.0_f32, color.gamma_multiply(0.35)))
+            .min_size(Vec2::new(0.0, 24.0)),
+    )
+}
+
+pub fn icon_button(ui: &mut Ui, icon: ActionIcon, tooltip: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(28.0, 24.0), Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(5), visuals.bg_fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(5),
+        visuals.bg_stroke,
+        StrokeKind::Inside,
+    );
+    draw_action_icon(ui, icon, rect.center(), TEXT);
+    response.on_hover_text(tooltip)
 }
 
 pub fn action_button(
@@ -236,6 +261,27 @@ fn draw_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, color: Color32) {
                 [
                     Pos2::new(center.x - 7.0, center.y + 8.0),
                     Pos2::new(center.x + 7.0, center.y + 8.0),
+                ],
+                stroke,
+            );
+        }
+        ActionIcon::Delete => {
+            let body = Rect::from_min_size(
+                Pos2::new(center.x - 5.0, center.y - 4.0),
+                Vec2::new(10.0, 11.0),
+            );
+            painter.rect_stroke(body, CornerRadius::same(1), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 7.0, center.y - 6.0),
+                    Pos2::new(center.x + 7.0, center.y - 6.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 2.5, center.y - 8.0),
+                    Pos2::new(center.x + 2.5, center.y - 8.0),
                 ],
                 stroke,
             );

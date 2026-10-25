@@ -260,6 +260,7 @@ impl StudioApp {
 
     fn show_guide_controls(&mut self, ui: &mut Ui) {
         let available_roles = self.available_roles();
+        let mut role_to_add = None;
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "02 / COMPOSITION GUIDE");
             ui.label(
@@ -268,9 +269,11 @@ impl StudioApp {
                     .color(theme::MUTED),
             );
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("選べる役割").size(10.0).color(theme::MUTED));
+                theme::caption(ui, "ADD SLOT");
                 for role in &available_roles {
-                    theme::badge(ui, role, theme::ACCENT);
+                    if theme::badge_button(ui, role, theme::ACCENT).clicked() {
+                        role_to_add = Some(role.clone());
+                    }
                 }
             });
             ui.add_space(4.0);
@@ -278,20 +281,27 @@ impl StudioApp {
             let can_remove = self.guide_inputs.len() > 1;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt(("guide-role", index))
-                        .selected_text(&guide_input.role)
-                        .width(92.0)
-                        .show_ui(ui, |ui| {
-                            for role in &available_roles {
-                                ui.selectable_value(&mut guide_input.role, role.clone(), role);
-                            }
-                        });
+                    ui.scope(|ui| {
+                        ui.spacing_mut().interact_size.y = 24.0;
+                        ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
+                        egui::ComboBox::from_id_salt(("guide-role", index))
+                            .selected_text(&guide_input.role)
+                            .width(92.0)
+                            .show_ui(ui, |ui| {
+                                for role in &available_roles {
+                                    ui.selectable_value(&mut guide_input.role, role.clone(), role);
+                                }
+                            });
+                    });
                     ui.add(
                         egui::TextEdit::singleline(&mut guide_input.query)
                             .desired_width(330.0)
                             .hint_text("探したい語句・タグ"),
                     );
-                    if can_remove && ui.small_button("REMOVE").clicked() {
+                    if can_remove
+                        && theme::icon_button(ui, theme::ActionIcon::Delete, "このスロットを削除")
+                            .clicked()
+                    {
                         remove_index = Some(index);
                     }
                 });
@@ -299,11 +309,9 @@ impl StudioApp {
             if let Some(index) = remove_index {
                 self.guide_inputs.remove(index);
             }
-            if ui.small_button("+ ADD SLOT").clicked()
-                && let Some(role) = available_roles.first()
-            {
+            if let Some(role) = role_to_add {
                 self.guide_inputs.push(GuideInput {
-                    role: role.clone(),
+                    role,
                     query: String::new(),
                 });
             }
@@ -616,52 +624,57 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         .corner_radius(8)
         .inner_margin(10)
         .show(ui, |ui| {
-            ui.set_width(width - 24.0);
-            ui.horizontal(|ui| {
-                theme::badge(
-                    ui,
-                    &format!("{} PT", candidate.score),
-                    if selected {
-                        theme::ACCENT
-                    } else {
-                        theme::MUTED
-                    },
-                );
-                if selected {
-                    ui.label(
-                        RichText::new("SELECTED")
-                            .size(10.0)
-                            .strong()
-                            .color(theme::ACCENT),
+            ui.vertical(|ui| {
+                ui.set_width(width - 24.0);
+                ui.horizontal(|ui| {
+                    theme::badge(
+                        ui,
+                        &format!("{} PT", candidate.score),
+                        if selected {
+                            theme::ACCENT
+                        } else {
+                            theme::MUTED
+                        },
                     );
-                }
-            });
-            ui.add(
-                egui::Label::new(RichText::new(&candidate.segment_id).size(12.0).strong())
+                    if selected {
+                        ui.label(
+                            RichText::new("SELECTED")
+                                .size(10.0)
+                                .strong()
+                                .color(theme::ACCENT),
+                        );
+                    }
+                });
+                ui.add(
+                    egui::Label::new(RichText::new(&candidate.segment_id).size(12.0).strong())
+                        .truncate(),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{}–{} ms", candidate.start_ms, candidate.end_ms))
+                            .monospace()
+                            .size(10.0)
+                            .color(theme::MUTED),
+                    )
                     .truncate(),
-            );
-            ui.label(
-                RichText::new(format!("{}–{} ms", candidate.start_ms, candidate.end_ms))
-                    .monospace()
-                    .size(10.0)
-                    .color(theme::MUTED),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(&candidate.source_path)
-                        .size(10.0)
-                        .color(theme::MUTED),
-                )
-                .truncate(),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(candidate.reasons.join(" / "))
-                        .size(10.0)
-                        .color(theme::ACCENT),
-                )
-                .truncate(),
-            );
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&candidate.source_path)
+                            .size(10.0)
+                            .color(theme::MUTED),
+                    )
+                    .truncate(),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(candidate.reasons.join(" / "))
+                            .size(10.0)
+                            .color(theme::ACCENT),
+                    )
+                    .truncate(),
+                );
+            });
         })
         .response;
     let response = ui.interact(
