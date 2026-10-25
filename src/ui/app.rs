@@ -542,9 +542,9 @@ impl eframe::App for StudioApp {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
             .show(context, |ui| {
+                self.show_header(ui);
+                ui.add_space(12.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_header(ui);
-                    ui.add_space(12.0);
                     ui.columns(2, |columns| {
                         let controls = &mut columns[0];
                         self.show_catalog_controls(controls);
