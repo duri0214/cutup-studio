@@ -188,16 +188,23 @@ impl StudioApp {
             );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
-                    theme::badge(
-                        ui,
-                        &format!("{} SEGMENTS", catalog.segments.len()),
-                        theme::ACCENT,
-                    );
+                    let label = if self.catalog_path.is_none() {
+                        "候補用のデモ素材"
+                    } else {
+                        "読み込んだ素材区間"
+                    };
                     ui.label(
-                        RichText::new(&catalog.material_root)
+                        RichText::new(format!("{label}: {} 件", catalog.segments.len()))
                             .size(10.0)
                             .color(theme::MUTED),
                     );
+                    if self.catalog_path.is_some() {
+                        ui.label(
+                            RichText::new(&catalog.material_root)
+                                .size(10.0)
+                                .color(theme::MUTED),
+                        );
+                    }
                 });
             }
         });
