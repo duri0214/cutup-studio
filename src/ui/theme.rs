@@ -146,7 +146,7 @@ pub fn action_button(
     let icon_center = Pos2::new(rect.left() + 18.0, rect.center().y);
     draw_action_icon(ui, icon, icon_center, text_color);
     ui.painter().text(
-        Pos2::new(rect.left() + 34.0, rect.center().y),
+        Pos2::new(rect.left() + 34.0, rect.center().y + 2.0),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(12.0),

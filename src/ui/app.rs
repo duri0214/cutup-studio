@@ -13,7 +13,6 @@ use crate::{
 use super::theme;
 
 const DEMO_GUIDE: &str = "導入: テッカマン\nつなぎ: 驚き 反応";
-const DEMO_CATALOG_LABEL: &str = "組み込みデモ — 素材なしで候補選択と manifest 保存を試せます";
 
 pub struct StudioApp {
     catalog: Option<Catalog>,
@@ -35,7 +34,7 @@ impl StudioApp {
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
-            status: "DEMO READY — 候補選択から manifest 保存まで試せます。".into(),
+            status: "READY — GUIDE を生成して候補を確認できます。".into(),
         }
     }
 
@@ -66,7 +65,7 @@ impl StudioApp {
         self.plan = None;
         self.selections.clear();
         self.active_slot = None;
-        self.status = "DEMO READY — 候補選択から manifest 保存まで試せます。".into();
+        self.status = "READY — GUIDE を生成して候補を確認できます。".into();
     }
 
     fn build_plan(&mut self) {
@@ -156,15 +155,17 @@ impl StudioApp {
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "01 / MATERIAL CATALOG");
-            let location = self
-                .catalog_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| DEMO_CATALOG_LABEL.into());
-            ui.add(
-                egui::Label::new(RichText::new(location).size(11.0).color(theme::MUTED)).truncate(),
-            );
-            ui.add_space(4.0);
+            if let Some(path) = &self.catalog_path {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(path.display().to_string())
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    )
+                    .truncate(),
+                );
+                ui.add_space(4.0);
+            }
             if theme::action_button(
                 ui,
                 theme::ActionIcon::Open,
@@ -195,21 +196,19 @@ impl StudioApp {
             );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
-                    let label = if self.catalog_path.is_none() {
-                        "候補用のデモ素材"
-                    } else {
-                        "読み込んだ素材区間"
-                    };
                     ui.label(
-                        RichText::new(format!("{label}: {} 件", catalog.segments.len()))
+                        RichText::new(format!("登録済みの素材区間: {} 件", catalog.segments.len()))
                             .size(10.0)
                             .color(theme::MUTED),
                     );
                     if self.catalog_path.is_some() {
-                        ui.label(
-                            RichText::new(&catalog.material_root)
-                                .size(10.0)
-                                .color(theme::MUTED),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("素材フォルダ: {}", catalog.material_root))
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .truncate(),
                         );
                     }
                 });
