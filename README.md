@@ -16,7 +16,7 @@ cargo run
 
 起動直後は組み込みデモカタログが選ばれています。`GENERATE CANDIDATES`、候補の選択、`SAVE MANIFEST` までの操作を、素材ファイルを用意せずに確認できます。デモの参照パスは仮想的なもので、動画・音声の再生や書き出しには使えません。
 
-自身の素材で使う場合は、`OPEN SOURCE CATALOG JSON` からカタログを開きます。`examples/catalog.json` を雛形として、`material_root` を自身の素材フォルダへ置き換え、各 `source_path` をその配下からの相対パスにします。アプリは素材ルートが実在すること、素材パスがルート外へ出ないことを確認します。`SAVE MANIFEST` で保存した `composition-manifest.json` は出力ファイルであり、ここには読み込めません。
+自身の素材で使う場合は、01 / MATERIAL CATALOG の `OPEN` から catalog JSON を開きます。catalog JSON は、`material_root` の素材フォルダと、候補に使う素材クリップを定義する入力ファイルです。`examples/catalog.json` を雛形として、`material_root` を自身の素材フォルダへ置き換え、各 `source_path` をその配下からの相対パスにします。アプリは素材ルートが実在すること、素材パスがルート外へ出ないことを確認します。候補を選んで `SAVE MANIFEST` を押すと、Downloads に `composition-manifest.json` を出力します。
 
 ```json
 {

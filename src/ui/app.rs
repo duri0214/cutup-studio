@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 
@@ -12,12 +15,16 @@ use crate::{
 
 use super::theme;
 
-const DEMO_GUIDE: &str = "導入: テッカマン\nつなぎ: 驚き 反応";
+#[derive(Clone)]
+struct GuideInput {
+    role: String,
+    query: String,
+}
 
 pub struct StudioApp {
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
-    guide_text: String,
+    guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
     selections: BTreeMap<String, String>,
     active_slot: Option<usize>,
@@ -30,7 +37,7 @@ impl StudioApp {
         Self {
             catalog: Some(demo_catalog()),
             catalog_path: None,
-            guide_text: DEMO_GUIDE.into(),
+            guide_inputs: demo_guide_inputs(),
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
@@ -50,6 +57,7 @@ impl StudioApp {
             Ok(catalog) => {
                 self.catalog_path = Some(path);
                 self.catalog = Some(catalog);
+                self.normalize_guide_roles();
                 self.plan = None;
                 self.selections.clear();
                 self.active_slot = None;
@@ -62,7 +70,7 @@ impl StudioApp {
     fn use_demo_catalog(&mut self) {
         self.catalog = Some(demo_catalog());
         self.catalog_path = None;
-        self.guide_text = DEMO_GUIDE.into();
+        self.guide_inputs = demo_guide_inputs();
         self.plan = None;
         self.selections.clear();
         self.active_slot = None;
@@ -70,13 +78,14 @@ impl StudioApp {
     }
 
     fn build_plan(&mut self) {
+        let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
             self.status = "CATALOG JSON を先に読み込んでください。".into();
             return;
         };
-        let plan = create_plan(catalog, &self.guide_text);
+        let plan = create_plan(catalog, &guide_text);
         if plan.slots.is_empty() {
-            self.status = "GUIDE を `役割: 語句 タグ` の形式で入力してください。".into();
+            self.status = "GUIDE に語句またはタグを入力してください。".into();
             return;
         }
         self.selections = plan
@@ -94,6 +103,32 @@ impl StudioApp {
             plan.slots.len()
         );
         self.plan = Some(plan);
+    }
+
+    fn available_roles(&self) -> Vec<String> {
+        self.catalog
+            .iter()
+            .flat_map(|catalog| catalog.segments.iter())
+            .flat_map(|segment| segment.roles.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn normalize_guide_roles(&mut self) {
+        let available_roles = self.available_roles();
+        let Some(first_role) = available_roles.first() else {
+            return;
+        };
+        for guide_input in &mut self.guide_inputs {
+            if !available_roles.contains(&guide_input.role) {
+                guide_input.role.clone_from(first_role);
+            }
+        }
+    }
+
+    fn guide_text(&self) -> String {
+        guide_text_from_inputs(&self.guide_inputs)
     }
 
     fn save_manifest(&mut self) {
@@ -224,19 +259,54 @@ impl StudioApp {
     }
 
     fn show_guide_controls(&mut self, ui: &mut Ui) {
+        let available_roles = self.available_roles();
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "02 / COMPOSITION GUIDE");
             ui.label(
-                RichText::new("一行ごとに  役割: 探したい語句 タグ")
+                RichText::new("役割を選び、探したい語句・タグを入力します。")
                     .size(11.0)
                     .color(theme::MUTED),
             );
-            ui.add(
-                egui::TextEdit::multiline(&mut self.guide_text)
-                    .desired_rows(4)
-                    .margin(egui::Vec2::splat(8.0))
-                    .font(egui::TextStyle::Monospace),
-            );
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("選べる役割").size(10.0).color(theme::MUTED));
+                for role in &available_roles {
+                    theme::badge(ui, role, theme::ACCENT);
+                }
+            });
+            ui.add_space(4.0);
+            let mut remove_index = None;
+            let can_remove = self.guide_inputs.len() > 1;
+            for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt(("guide-role", index))
+                        .selected_text(&guide_input.role)
+                        .width(92.0)
+                        .show_ui(ui, |ui| {
+                            for role in &available_roles {
+                                ui.selectable_value(&mut guide_input.role, role.clone(), role);
+                            }
+                        });
+                    ui.add(
+                        egui::TextEdit::singleline(&mut guide_input.query)
+                            .desired_width(330.0)
+                            .hint_text("探したい語句・タグ"),
+                    );
+                    if can_remove && ui.small_button("REMOVE").clicked() {
+                        remove_index = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_index {
+                self.guide_inputs.remove(index);
+            }
+            if ui.small_button("+ ADD SLOT").clicked()
+                && let Some(role) = available_roles.first()
+            {
+                self.guide_inputs.push(GuideInput {
+                    role: role.clone(),
+                    query: String::new(),
+                });
+            }
             if theme::action_button(
                 ui,
                 theme::ActionIcon::Generate,
@@ -453,6 +523,28 @@ fn manifest_save_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn demo_guide_inputs() -> Vec<GuideInput> {
+    vec![
+        GuideInput {
+            role: "導入".into(),
+            query: "テッカマン".into(),
+        },
+        GuideInput {
+            role: "つなぎ".into(),
+            query: "驚き 反応".into(),
+        },
+    ]
+}
+
+fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
+    guide_inputs
+        .iter()
+        .filter(|guide_input| !guide_input.query.trim().is_empty())
+        .map(|guide_input| format!("{}: {}", guide_input.role, guide_input.query.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn demo_catalog() -> Catalog {
     Catalog {
         schema_version: SCHEMA_VERSION,
@@ -597,7 +689,7 @@ mod tests {
         let catalog = demo_catalog();
         catalog.validate_metadata().unwrap();
 
-        let plan = create_plan(&catalog, DEMO_GUIDE);
+        let plan = create_plan(&catalog, &guide_text_from_inputs(&demo_guide_inputs()));
 
         assert_eq!(plan.slots.len(), 2);
         assert!(plan.slots.iter().all(|slot| !slot.candidates.is_empty()));
