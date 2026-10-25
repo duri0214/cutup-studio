@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    FontTweak, Frame, Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontTweak, Frame,
+    Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
@@ -167,20 +167,7 @@ pub fn action_button(
     primary: bool,
     size: Vec2,
 ) -> Response {
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let enabled = ui.is_enabled();
-    let visuals = ui.style().interact(&response);
-    let fill = if primary && enabled {
-        if response.is_pointer_button_down_on() {
-            ACCENT.gamma_multiply(0.72)
-        } else if response.hovered() {
-            ACCENT.gamma_multiply(0.9)
-        } else {
-            ACCENT
-        }
-    } else {
-        visuals.bg_fill
-    };
     let text_color = if primary && enabled {
         BACKGROUND
     } else if enabled {
@@ -188,37 +175,28 @@ pub fn action_button(
     } else {
         MUTED
     };
-    let stroke = Stroke::new(
-        1.0_f32,
-        if primary && enabled {
-            ACCENT
-        } else {
-            visuals.bg_stroke.color
-        },
-    );
-    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
-    ui.painter()
-        .rect_stroke(rect, CornerRadius::same(6), stroke, StrokeKind::Inside);
-
-    paint_action_icon(
-        ui,
-        icon,
-        Pos2::new(rect.left() + 18.0, rect.center().y),
-        Vec2::splat(16.0),
-        text_color,
-    );
-    ui.painter().text(
-        Pos2::new(rect.left() + 34.0, rect.center().y + 2.0),
-        Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(12.0),
-        text_color,
-    );
-    response
+    let mut button = egui::Button::image_and_text(
+        action_icon_image(icon),
+        RichText::new(label).size(12.0).color(text_color),
+    )
+    .image_tint_follows_text_color(true)
+    .min_size(size)
+    .corner_radius(6);
+    if primary && enabled {
+        button = button.fill(ACCENT).stroke(Stroke::new(1.0_f32, ACCENT));
+    }
+    ui.horizontal(|ui| ui.add_sized(size, button)).inner
 }
 
 fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {
-    let image = match icon {
+    action_icon_image(icon)
+        .fit_to_exact_size(size)
+        .tint(color)
+        .paint_at(ui, egui::Rect::from_center_size(center, size));
+}
+
+fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
+    match icon {
         ActionIcon::Open => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/folder-open.svg"
         )),
@@ -234,9 +212,5 @@ fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color:
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))
         }
-    };
-    image
-        .fit_to_exact_size(size)
-        .tint(color)
-        .paint_at(ui, egui::Rect::from_center_size(center, size));
+    }
 }
