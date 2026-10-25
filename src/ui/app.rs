@@ -41,7 +41,7 @@ impl StudioApp {
     fn open_catalog(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .set_title("catalog JSON を選択")
-            .add_filter("catalog JSON（素材フォルダと素材区間）", &["json"])
+            .add_filter("catalog JSON（素材フォルダと素材クリップ）", &["json"])
             .pick_file()
         else {
             return;
@@ -157,9 +157,11 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "01 / MATERIAL CATALOG");
             ui.label(
-                RichText::new("素材フォルダと候補に使う素材区間を定義した catalog JSON を開きます。")
-                    .size(11.0)
-                    .color(theme::MUTED),
+                RichText::new(
+                    "素材フォルダと候補に使う素材クリップを定義した catalog JSON を開きます。",
+                )
+                .size(11.0)
+                .color(theme::MUTED),
             );
             ui.add_space(4.0);
             if let Some(path) = &self.catalog_path {
@@ -196,19 +198,15 @@ impl StudioApp {
             {
                 self.use_demo_catalog();
             }
-            ui.label(
-                RichText::new(
-                    "候補を選択して保存すると、composition-manifest.json を Downloads に出力します。",
-                )
-                    .size(10.0)
-                    .color(theme::MUTED),
-            );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("登録済みの素材区間: {} 件", catalog.segments.len()))
-                            .size(10.0)
-                            .color(theme::MUTED),
+                        RichText::new(format!(
+                            "登録済みの素材クリップ: {} 件",
+                            catalog.segments.len()
+                        ))
+                        .size(10.0)
+                        .color(theme::MUTED),
                     );
                     if self.catalog_path.is_some() {
                         ui.add(
@@ -344,7 +342,9 @@ impl StudioApp {
                 });
             });
             ui.label(
-                RichText::new("確定する順序。映像・音声の書き出しは行いません。")
+                RichText::new(
+                    "確定する順序。SAVE MANIFEST で composition-manifest.json を Downloads に出力します。",
+                )
                     .size(11.0)
                     .color(theme::MUTED),
             );
