@@ -8,7 +8,7 @@ use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 use crate::{
     domain::{
         service::{create_plan, manifest_from_plan},
-        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment, SlotPlan},
+        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment},
     },
     infra::catalog_file::{load_catalog, save_manifest},
 };
@@ -153,13 +153,6 @@ impl StudioApp {
             Ok(()) => self.status = format!("MANIFEST SAVED — {}", path.display()),
             Err(error) => self.status = format!("MANIFEST ERROR — {error}"),
         }
-    }
-
-    fn active_slot_plan(&self) -> Option<&SlotPlan> {
-        self.plan
-            .as_ref()?
-            .slots
-            .get(self.active_slot.unwrap_or_default())
     }
 
     fn show_header(&self, ui: &mut Ui) {
@@ -358,25 +351,25 @@ impl StudioApp {
         });
     }
 
-    fn show_slot_tabs(&mut self, ui: &mut Ui) {
-        let Some(plan) = &self.plan else {
-            return;
-        };
-        theme::caption(ui, "03 / GUIDE SLOTS");
-        ui.horizontal_wrapped(|ui| {
-            for (index, slot) in plan.slots.iter().enumerate() {
-                let selected = self.active_slot == Some(index);
-                let label = format!("{:02} {}", slot.slot.order, slot.slot.role);
-                if ui.selectable_label(selected, label).clicked() {
-                    self.active_slot = Some(index);
-                }
-            }
-        });
-    }
-
     fn show_candidate_grid(&mut self, ui: &mut Ui) {
-        let Some(slot) = self.active_slot_plan() else {
+        let slot_tabs: Vec<_> = self
+            .plan
+            .as_ref()
+            .map(|plan| {
+                plan.slots
+                    .iter()
+                    .map(|slot| format!("{:02} {}", slot.slot.order, slot.slot.role))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let active_index = self.active_slot.unwrap_or_default();
+        let active_slot = self
+            .plan
+            .as_ref()
+            .and_then(|plan| plan.slots.get(active_index));
+        let Some(slot) = active_slot else {
             theme::panel().show(ui, |ui| {
+                theme::caption(ui, "03 / CANDIDATES");
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("候補はここに表示されます").color(theme::MUTED));
                 });
@@ -384,11 +377,25 @@ impl StudioApp {
             return;
         };
         let slot_id = slot.slot.id.clone();
-        let heading = format!("04 / CANDIDATES — {} / {}", slot.slot.role, slot.slot.query);
         let candidates = slot.candidates.clone();
         let selected = self.selections.get(&slot_id).cloned();
+        let mut next_active_index = active_index;
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, &heading);
+            theme::caption(ui, "03 / CANDIDATES");
+            ui.horizontal_wrapped(|ui| {
+                for (index, label) in slot_tabs.iter().enumerate() {
+                    if ui.selectable_label(index == active_index, label).clicked() {
+                        next_active_index = index;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!("{} / {}", slot.slot.role, slot.slot.query))
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
             if candidates.is_empty() {
                 ui.add_space(18.0);
                 ui.colored_label(
@@ -419,6 +426,10 @@ impl StudioApp {
                 self.status = "CANDIDATE SELECTED — STAGE の順序を確認して保存できます。".into();
             }
         });
+        if next_active_index != active_index {
+            self.active_slot = Some(next_active_index);
+            ui.ctx().request_repaint();
+        }
     }
 
     fn show_stage(&mut self, ui: &mut Ui) {
@@ -540,8 +551,6 @@ impl eframe::App for StudioApp {
                         controls.add_space(8.0);
                         self.show_guide_controls(controls);
                         controls.add_space(10.0);
-                        self.show_slot_tabs(controls);
-                        controls.add_space(6.0);
                         self.show_candidate_grid(controls);
 
                         let stage = &mut columns[1];
