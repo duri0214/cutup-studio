@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, Frame, RichText,
-    Stroke, Ui, Vec2,
+    self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
+    Frame, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
 pub const PANEL: Color32 = Color32::from_rgb(23, 29, 38);
@@ -12,6 +12,14 @@ pub const TEXT: Color32 = Color32::from_rgb(229, 236, 245);
 pub const ACCENT: Color32 = Color32::from_rgb(81, 224, 196);
 pub const AMBER: Color32 = Color32::from_rgb(248, 193, 91);
 pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
+
+#[derive(Clone, Copy)]
+pub enum ActionIcon {
+    Open,
+    Generate,
+    Save,
+    Reset,
+}
 
 pub fn install(context: &Context) {
     install_japanese_font(context);
@@ -89,4 +97,174 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(10.0).strong().color(color));
         });
+}
+
+pub fn action_button(
+    ui: &mut Ui,
+    icon: ActionIcon,
+    label: &str,
+    primary: bool,
+    size: Vec2,
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let enabled = ui.is_enabled();
+    let visuals = ui.style().interact(&response);
+    let fill = if primary && enabled {
+        if response.is_pointer_button_down_on() {
+            ACCENT.gamma_multiply(0.72)
+        } else if response.hovered() {
+            ACCENT.gamma_multiply(0.9)
+        } else {
+            ACCENT
+        }
+    } else {
+        visuals.bg_fill
+    };
+    let text_color = if primary && enabled {
+        BACKGROUND
+    } else if enabled {
+        TEXT
+    } else {
+        MUTED
+    };
+    let stroke = Stroke::new(
+        1.0_f32,
+        if primary && enabled {
+            ACCENT
+        } else {
+            visuals.bg_stroke.color
+        },
+    );
+    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+    ui.painter()
+        .rect_stroke(rect, CornerRadius::same(6), stroke, StrokeKind::Inside);
+
+    let icon_center = Pos2::new(rect.left() + 18.0, rect.center().y);
+    draw_action_icon(ui, icon, icon_center, text_color);
+    ui.painter().text(
+        Pos2::new(rect.left() + 34.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(12.0),
+        text_color,
+    );
+    response
+}
+
+fn draw_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, color: Color32) {
+    let painter = ui.painter();
+    let stroke = Stroke::new(1.5_f32, color);
+    match icon {
+        ActionIcon::Open => {
+            let folder = Rect::from_min_size(
+                Pos2::new(center.x - 8.0, center.y - 3.0),
+                Vec2::new(16.0, 10.0),
+            );
+            painter.rect_stroke(folder, CornerRadius::same(2), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 7.0, center.y - 3.0),
+                    Pos2::new(center.x - 2.0, center.y - 6.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 2.0, center.y - 6.0),
+                    Pos2::new(center.x + 2.0, center.y - 3.0),
+                ],
+                stroke,
+            );
+        }
+        ActionIcon::Generate => {
+            painter.line_segment(
+                [
+                    Pos2::new(center.x, center.y - 8.0),
+                    Pos2::new(center.x, center.y + 8.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 8.0, center.y),
+                    Pos2::new(center.x + 8.0, center.y),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 4.5, center.y - 4.5),
+                    Pos2::new(center.x + 4.5, center.y + 4.5),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 4.5, center.y + 4.5),
+                    Pos2::new(center.x + 4.5, center.y - 4.5),
+                ],
+                stroke,
+            );
+        }
+        ActionIcon::Save => {
+            painter.line_segment(
+                [
+                    Pos2::new(center.x, center.y - 8.0),
+                    Pos2::new(center.x, center.y + 5.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 4.0, center.y + 1.0),
+                    Pos2::new(center.x, center.y + 5.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + 4.0, center.y + 1.0),
+                    Pos2::new(center.x, center.y + 5.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 7.0, center.y + 8.0),
+                    Pos2::new(center.x + 7.0, center.y + 8.0),
+                ],
+                stroke,
+            );
+        }
+        ActionIcon::Reset => {
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + 7.0, center.y - 4.0),
+                    Pos2::new(center.x - 6.0, center.y - 4.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 6.0, center.y - 4.0),
+                    Pos2::new(center.x - 2.0, center.y - 8.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 6.0, center.y - 4.0),
+                    Pos2::new(center.x - 2.0, center.y),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + 7.0, center.y - 4.0),
+                    Pos2::new(center.x + 7.0, center.y + 7.0),
+                ],
+                stroke,
+            );
+        }
+    }
 }

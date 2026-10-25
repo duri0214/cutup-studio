@@ -125,6 +125,7 @@ impl StudioApp {
 
     fn show_header(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
+            ui.set_min_height(40.0);
             ui.label(
                 RichText::new("CUTUP")
                     .size(25.0)
@@ -164,20 +165,27 @@ impl StudioApp {
                 egui::Label::new(RichText::new(location).size(11.0).color(theme::MUTED)).truncate(),
             );
             ui.add_space(4.0);
-            if ui
-                .add_sized(
-                    Vec2::new(230.0, 32.0),
-                    egui::Button::new(
-                        RichText::new("↗  OPEN CATALOG JSON")
-                            .strong()
-                            .color(theme::TEXT),
-                    ),
-                )
-                .clicked()
+            if theme::action_button(
+                ui,
+                theme::ActionIcon::Open,
+                "OPEN CATALOG JSON",
+                false,
+                Vec2::new(230.0, 32.0),
+            )
+            .clicked()
             {
                 self.open_catalog();
             }
-            if self.catalog_path.is_some() && ui.button("↶  RESET TO DEMO CATALOG").clicked() {
+            if self.catalog_path.is_some()
+                && theme::action_button(
+                    ui,
+                    theme::ActionIcon::Reset,
+                    "RESET TO DEMO CATALOG",
+                    false,
+                    Vec2::new(250.0, 32.0),
+                )
+                .clicked()
+            {
                 self.use_demo_catalog();
             }
             ui.label(
@@ -222,17 +230,14 @@ impl StudioApp {
                     .desired_rows(4)
                     .font(egui::TextStyle::Monospace),
             );
-            if ui
-                .add_sized(
-                    Vec2::new(250.0, 32.0),
-                    egui::Button::new(
-                        RichText::new("✦  GENERATE CANDIDATES")
-                            .strong()
-                            .color(theme::BACKGROUND),
-                    )
-                    .fill(theme::ACCENT),
-                )
-                .clicked()
+            if theme::action_button(
+                ui,
+                theme::ActionIcon::Generate,
+                "GENERATE CANDIDATES",
+                true,
+                Vec2::new(250.0, 32.0),
+            )
+            .clicked()
             {
                 self.build_plan();
             }
@@ -323,6 +328,7 @@ impl StudioApp {
             .unwrap_or_default();
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.set_min_height(32.0);
                 theme::caption(ui, "COMPOSITION STAGE");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     theme::badge(ui, &format!("{} CUTS", entries.len()), theme::ACCENT);
@@ -383,14 +389,12 @@ impl StudioApp {
             }
             ui.add_space(8.0);
             let save_response = ui.add_enabled_ui(!entries.is_empty(), |ui| {
-                ui.add_sized(
+                theme::action_button(
+                    ui,
+                    theme::ActionIcon::Save,
+                    "SAVE MANIFEST",
+                    true,
                     Vec2::new(210.0, 34.0),
-                    egui::Button::new(
-                        RichText::new("↓  SAVE MANIFEST")
-                            .strong()
-                            .color(theme::BACKGROUND),
-                    )
-                    .fill(theme::ACCENT),
                 )
             });
             if save_response.inner.clicked() {
