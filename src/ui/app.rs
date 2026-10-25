@@ -132,11 +132,11 @@ impl StudioApp {
                     .color(theme::ACCENT),
             );
             ui.label(RichText::new("STUDIO").size(25.0).strong());
-            if self.catalog_path.is_none() {
-                theme::badge(ui, "DEMO", theme::AMBER);
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
+                if self.catalog_path.is_none() {
+                    theme::badge(ui, "DEMO", theme::AMBER);
+                }
                 ui.label(
                     RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
                         .monospace()
@@ -167,11 +167,10 @@ impl StudioApp {
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new("OPEN SOURCE CATALOG JSON")
+                        RichText::new("OPEN CATALOG JSON")
                             .strong()
-                            .color(theme::BACKGROUND),
+                            .color(theme::TEXT),
                     )
-                    .fill(theme::ACCENT)
                     .min_size(Vec2::new(190.0, 32.0)),
                 )
                 .clicked()
