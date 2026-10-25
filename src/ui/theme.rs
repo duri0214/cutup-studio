@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    FontTweak, Frame, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    FontTweak, Frame, Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
+
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
 pub const PANEL: Color32 = Color32::from_rgb(23, 29, 38);
 pub const BORDER: Color32 = Color32::from_rgb(47, 58, 72);
@@ -23,6 +24,7 @@ pub enum ActionIcon {
 }
 
 pub fn install(context: &Context) {
+    egui_extras::install_image_loaders(context);
     install_japanese_font(context);
     context.set_theme(egui::ThemePreference::Dark);
     let mut style = (*context.style()).clone();
@@ -71,7 +73,7 @@ fn install_japanese_font(context: &Context) {
     fonts.font_data.insert(
         font_name.clone(),
         Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
-            y_offset: 2.0_f32,
+            y_offset: 2.0,
             ..Default::default()
         })),
     );
@@ -84,6 +86,7 @@ fn install_japanese_font(context: &Context) {
     }
     context.set_fonts(fonts);
 }
+
 pub fn panel() -> Frame {
     Frame::new()
         .fill(PANEL)
@@ -91,9 +94,11 @@ pub fn panel() -> Frame {
         .corner_radius(10)
         .inner_margin(14)
 }
+
 pub fn caption(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).size(10.0).strong().color(MUTED));
 }
+
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
     Frame::new()
         .fill(color.gamma_multiply(0.12))
@@ -124,7 +129,7 @@ pub fn icon_button(ui: &mut Ui, icon: ActionIcon, tooltip: &str) -> Response {
         visuals.bg_stroke,
         StrokeKind::Inside,
     );
-    draw_action_icon(ui, icon, rect.center(), TEXT);
+    paint_action_icon(ui, icon, rect.center(), Vec2::splat(16.0), TEXT);
     response.on_hover_text(tooltip)
 }
 
@@ -135,15 +140,15 @@ pub fn drag_handle(ui: &mut Ui) -> Response {
     } else {
         MUTED
     };
-    for x in [-3.0_f32, 3.0_f32] {
-        for y in [-5.0_f32, 0.0_f32, 5.0_f32] {
-            ui.painter().circle_filled(
-                Pos2::new(rect.center().x + x, rect.center().y + y),
-                1.3,
-                color,
-            );
-        }
-    }
+    egui::Image::new(egui::include_image!(
+        "../../assets/icons/lucide/grip-vertical.svg"
+    ))
+    .fit_to_exact_size(Vec2::splat(16.0))
+    .tint(color)
+    .paint_at(
+        ui,
+        egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+    );
     response.on_hover_text("ドラッグして順番を入れ替え")
 }
 
@@ -187,8 +192,13 @@ pub fn action_button(
     ui.painter()
         .rect_stroke(rect, CornerRadius::same(6), stroke, StrokeKind::Inside);
 
-    let icon_center = Pos2::new(rect.left() + 18.0, rect.center().y);
-    draw_action_icon(ui, icon, icon_center, text_color);
+    paint_action_icon(
+        ui,
+        icon,
+        Pos2::new(rect.left() + 18.0, rect.center().y),
+        Vec2::splat(16.0),
+        text_color,
+    );
     ui.painter().text(
         Pos2::new(rect.left() + 34.0, rect.center().y + 2.0),
         Align2::LEFT_CENTER,
@@ -199,141 +209,26 @@ pub fn action_button(
     response
 }
 
-fn draw_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, color: Color32) {
-    let painter = ui.painter();
-    let stroke = Stroke::new(1.5_f32, color);
-    match icon {
-        ActionIcon::Open => {
-            let folder = Rect::from_min_size(
-                Pos2::new(center.x - 8.0, center.y - 3.0),
-                Vec2::new(16.0, 10.0),
-            );
-            painter.rect_stroke(folder, CornerRadius::same(2), stroke, StrokeKind::Inside);
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 7.0, center.y - 3.0),
-                    Pos2::new(center.x - 2.0, center.y - 6.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 2.0, center.y - 6.0),
-                    Pos2::new(center.x + 2.0, center.y - 3.0),
-                ],
-                stroke,
-            );
-        }
-        ActionIcon::Generate => {
-            painter.line_segment(
-                [
-                    Pos2::new(center.x, center.y - 8.0),
-                    Pos2::new(center.x, center.y + 8.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 8.0, center.y),
-                    Pos2::new(center.x + 8.0, center.y),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 4.5, center.y - 4.5),
-                    Pos2::new(center.x + 4.5, center.y + 4.5),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 4.5, center.y + 4.5),
-                    Pos2::new(center.x + 4.5, center.y - 4.5),
-                ],
-                stroke,
-            );
-        }
-        ActionIcon::Save => {
-            painter.line_segment(
-                [
-                    Pos2::new(center.x, center.y - 8.0),
-                    Pos2::new(center.x, center.y + 5.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 4.0, center.y + 1.0),
-                    Pos2::new(center.x, center.y + 5.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x + 4.0, center.y + 1.0),
-                    Pos2::new(center.x, center.y + 5.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 7.0, center.y + 8.0),
-                    Pos2::new(center.x + 7.0, center.y + 8.0),
-                ],
-                stroke,
-            );
-        }
+fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {
+    let image = match icon {
+        ActionIcon::Open => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/folder-open.svg"
+        )),
+        ActionIcon::Generate => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/wand-sparkles.svg"
+        )),
+        ActionIcon::Save => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/download.svg"
+        )),
+        ActionIcon::Reset => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/rotate-ccw.svg"
+        )),
         ActionIcon::Delete => {
-            let body = Rect::from_min_size(
-                Pos2::new(center.x - 5.0, center.y - 4.0),
-                Vec2::new(10.0, 11.0),
-            );
-            painter.rect_stroke(body, CornerRadius::same(1), stroke, StrokeKind::Inside);
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 7.0, center.y - 6.0),
-                    Pos2::new(center.x + 7.0, center.y - 6.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 2.5, center.y - 8.0),
-                    Pos2::new(center.x + 2.5, center.y - 8.0),
-                ],
-                stroke,
-            );
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))
         }
-        ActionIcon::Reset => {
-            painter.line_segment(
-                [
-                    Pos2::new(center.x + 7.0, center.y - 4.0),
-                    Pos2::new(center.x - 6.0, center.y - 4.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 6.0, center.y - 4.0),
-                    Pos2::new(center.x - 2.0, center.y - 8.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - 6.0, center.y - 4.0),
-                    Pos2::new(center.x - 2.0, center.y),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x + 7.0, center.y - 4.0),
-                    Pos2::new(center.x + 7.0, center.y + 7.0),
-                ],
-                stroke,
-            );
-        }
-    }
+    };
+    image
+        .fit_to_exact_size(size)
+        .tint(color)
+        .paint_at(ui, egui::Rect::from_center_size(center, size));
 }
