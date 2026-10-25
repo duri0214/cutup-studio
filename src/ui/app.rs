@@ -101,10 +101,10 @@ impl StudioApp {
             self.status = "候補を生成してから保存してください。".into();
             return;
         };
-        let Some(path) = rfd::FileDialog::new()
+        let dialog = rfd::FileDialog::new()
             .set_file_name("composition-manifest.json")
-            .save_file()
-        else {
+            .set_directory(manifest_save_directory());
+        let Some(path) = dialog.save_file() else {
             return;
         };
         match manifest_from_plan(plan, &self.selections)
@@ -422,6 +422,14 @@ impl eframe::App for StudioApp {
                 });
             });
     }
+}
+
+fn manifest_save_directory() -> PathBuf {
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .map(|profile| profile.join("Downloads"))
+        .filter(|directory| directory.is_dir())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn demo_catalog() -> Catalog {
