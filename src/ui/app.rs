@@ -165,19 +165,19 @@ impl StudioApp {
             );
             ui.add_space(4.0);
             if ui
-                .add(
+                .add_sized(
+                    Vec2::new(230.0, 32.0),
                     egui::Button::new(
-                        RichText::new("OPEN CATALOG JSON")
+                        RichText::new("↗  OPEN CATALOG JSON")
                             .strong()
                             .color(theme::TEXT),
-                    )
-                    .min_size(Vec2::new(190.0, 32.0)),
+                    ),
                 )
                 .clicked()
             {
                 self.open_catalog();
             }
-            if self.catalog_path.is_some() && ui.button("RESET TO DEMO CATALOG").clicked() {
+            if self.catalog_path.is_some() && ui.button("↶  RESET TO DEMO CATALOG").clicked() {
                 self.use_demo_catalog();
             }
             ui.label(
@@ -223,14 +223,14 @@ impl StudioApp {
                     .font(egui::TextStyle::Monospace),
             );
             if ui
-                .add(
+                .add_sized(
+                    Vec2::new(250.0, 32.0),
                     egui::Button::new(
-                        RichText::new("GENERATE CANDIDATES")
+                        RichText::new("✦  GENERATE CANDIDATES")
                             .strong()
                             .color(theme::BACKGROUND),
                     )
-                    .fill(theme::ACCENT)
-                    .min_size(Vec2::new(220.0, 32.0)),
+                    .fill(theme::ACCENT),
                 )
                 .clicked()
             {
@@ -382,19 +382,18 @@ impl StudioApp {
                 ui.add_space(3.0);
             }
             ui.add_space(8.0);
-            if ui
-                .add_enabled(
-                    !entries.is_empty(),
+            let save_response = ui.add_enabled_ui(!entries.is_empty(), |ui| {
+                ui.add_sized(
+                    Vec2::new(210.0, 34.0),
                     egui::Button::new(
-                        RichText::new("SAVE MANIFEST")
+                        RichText::new("↓  SAVE MANIFEST")
                             .strong()
                             .color(theme::BACKGROUND),
                     )
-                    .fill(theme::ACCENT)
-                    .min_size(Vec2::new(180.0, 34.0)),
+                    .fill(theme::ACCENT),
                 )
-                .clicked()
-            {
+            });
+            if save_response.inner.clicked() {
                 self.save_manifest();
             }
         });
