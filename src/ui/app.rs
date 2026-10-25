@@ -40,7 +40,8 @@ impl StudioApp {
 
     fn open_catalog(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("catalog JSON", &["json"])
+            .set_title("catalog JSON を選択")
+            .add_filter("catalog JSON（素材フォルダと素材区間）", &["json"])
             .pick_file()
         else {
             return;
@@ -155,6 +156,12 @@ impl StudioApp {
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "01 / MATERIAL CATALOG");
+            ui.label(
+                RichText::new("素材フォルダと候補に使う素材区間を定義した catalog JSON を開きます。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
             if let Some(path) = &self.catalog_path {
                 ui.add(
                     egui::Label::new(
@@ -190,7 +197,9 @@ impl StudioApp {
                 self.use_demo_catalog();
             }
             ui.label(
-                RichText::new("保存した composition-manifest.json はここには読み込めません。")
+                RichText::new(
+                    "候補を選択して保存すると、composition-manifest.json を Downloads に出力します。",
+                )
                     .size(10.0)
                     .color(theme::MUTED),
             );
