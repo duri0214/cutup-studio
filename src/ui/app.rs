@@ -305,12 +305,13 @@ impl StudioApp {
             );
             ui.add_space(8.0);
             if entries.is_empty() {
-                ui.add_space(50.0);
-                ui.centered_and_justified(|ui| {
+                ui.add_space(24.0);
+                ui.horizontal_centered(|ui| {
                     ui.label(
                         RichText::new("GUIDE を生成すると構成が表示されます").color(theme::MUTED),
                     );
                 });
+                ui.add_space(24.0);
             }
             for (order, role, candidate) in &entries {
                 let (name, timing, source) = candidate.as_ref().map_or_else(
@@ -381,20 +382,22 @@ impl eframe::App for StudioApp {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
             .show(context, |ui| {
-                self.show_header(ui);
-                ui.add_space(12.0);
-                ui.columns(2, |columns| {
-                    let controls = &mut columns[0];
-                    self.show_catalog_controls(controls);
-                    controls.add_space(8.0);
-                    self.show_guide_controls(controls);
-                    controls.add_space(10.0);
-                    self.show_slot_tabs(controls);
-                    controls.add_space(6.0);
-                    self.show_candidate_grid(controls);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_header(ui);
+                    ui.add_space(12.0);
+                    ui.columns(2, |columns| {
+                        let controls = &mut columns[0];
+                        self.show_catalog_controls(controls);
+                        controls.add_space(8.0);
+                        self.show_guide_controls(controls);
+                        controls.add_space(10.0);
+                        self.show_slot_tabs(controls);
+                        controls.add_space(6.0);
+                        self.show_candidate_grid(controls);
 
-                    let stage = &mut columns[1];
-                    self.show_stage(stage);
+                        let stage = &mut columns[1];
+                        self.show_stage(stage);
+                    });
                 });
             });
     }

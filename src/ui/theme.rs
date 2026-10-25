@@ -1,4 +1,9 @@
-use eframe::egui::{self, Color32, Context, CornerRadius, Frame, RichText, Stroke, Ui, Vec2};
+use std::sync::Arc;
+
+use eframe::egui::{
+    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, Frame, RichText,
+    Stroke, Ui, Vec2,
+};
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
 pub const PANEL: Color32 = Color32::from_rgb(23, 29, 38);
 pub const BORDER: Color32 = Color32::from_rgb(47, 58, 72);
@@ -7,7 +12,9 @@ pub const TEXT: Color32 = Color32::from_rgb(229, 236, 245);
 pub const ACCENT: Color32 = Color32::from_rgb(81, 224, 196);
 pub const AMBER: Color32 = Color32::from_rgb(248, 193, 91);
 pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
+
 pub fn install(context: &Context) {
+    install_japanese_font(context);
     context.set_theme(egui::ThemePreference::Dark);
     let mut style = (*context.style()).clone();
     style.visuals = egui::Visuals::dark();
@@ -37,6 +44,32 @@ pub fn install(context: &Context) {
     style.spacing.button_padding = Vec2::new(12.0, 7.0);
     style.spacing.interact_size.y = 30.0;
     context.set_style(style);
+}
+
+fn install_japanese_font(context: &Context) {
+    let Some(windows_directory) = std::env::var_os("WINDIR") else {
+        return;
+    };
+    let path = std::path::Path::new(&windows_directory)
+        .join("Fonts")
+        .join("YuGothM.ttc");
+    let Ok(font_data) = std::fs::read(path) else {
+        return;
+    };
+
+    let mut fonts = FontDefinitions::default();
+    let font_name = "yu-gothic".to_owned();
+    fonts
+        .font_data
+        .insert(font_name.clone(), Arc::new(FontData::from_owned(font_data)));
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, font_name.clone());
+    }
+    context.set_fonts(fonts);
 }
 pub fn panel() -> Frame {
     Frame::new()
