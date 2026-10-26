@@ -1,19 +1,25 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
+    sync::mpsc::{self, Receiver, TryRecvError},
 };
 
 use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 
 use crate::{
+    domain::valueobject::catalog::ScanReport,
     domain::{
         service::{create_plan, manifest_from_plan},
         valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment},
     },
     infra::catalog_file::{load_catalog, save_manifest},
+    infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
+use super::catalog_editor::CatalogEditor;
 use super::theme;
+
+type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
 
 #[derive(Clone)]
 struct GuideInput {
@@ -24,6 +30,8 @@ struct GuideInput {
 pub struct StudioApp {
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
+    editor: Option<CatalogEditor>,
+    catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
     selections: BTreeMap<String, String>,
@@ -38,6 +46,8 @@ impl StudioApp {
         Self {
             catalog: Some(demo_catalog()),
             catalog_path: None,
+            editor: None,
+            catalog_task: None,
             guide_inputs: demo_guide_inputs(),
             plan: None,
             selections: BTreeMap::new(),
@@ -47,16 +57,25 @@ impl StudioApp {
         }
     }
 
-    fn open_catalog(&mut self) {
+    fn open_catalog(&mut self, context: &egui::Context) {
         let Some(path) = rfd::FileDialog::new()
-            .set_title("catalog JSON を選択")
-            .add_filter("catalog JSON（素材フォルダと素材クリップ）", &["json"])
+            .set_title("保存済みカタログを開く")
+            .add_filter("SQLite カタログ", &["sqlite", "db", "sqlite3"])
+            .add_filter("既存の catalog JSON", &["json"])
             .pick_file()
         else {
             return;
         };
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        {
+            self.start_catalog_task(path, None, context);
+            return;
+        }
         match load_catalog(&path) {
             Ok(catalog) => {
+                self.editor = None;
                 self.catalog_path = Some(path);
                 self.catalog = Some(catalog);
                 self.normalize_guide_roles();
@@ -71,6 +90,7 @@ impl StudioApp {
     }
 
     fn use_demo_catalog(&mut self) {
+        self.editor = None;
         self.catalog = Some(demo_catalog());
         self.catalog_path = None;
         self.guide_inputs = demo_guide_inputs();
@@ -81,10 +101,109 @@ impl StudioApp {
         self.status = "READY — GUIDE を生成して候補を確認できます。".into();
     }
 
+    fn create_catalog(&mut self, context: &egui::Context) {
+        let Some(root) = rfd::FileDialog::new()
+            .set_title("登録する素材フォルダを選択")
+            .pick_folder()
+        else {
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("新しいカタログの保存先（既存ファイルは上書きしません）")
+            .set_file_name("material-catalog.sqlite")
+            .add_filter("SQLite カタログ", &["sqlite"])
+            .save_file()
+        else {
+            return;
+        };
+        self.start_catalog_task(path, Some(root), context);
+    }
+
+    fn start_catalog_task(
+        &mut self,
+        path: PathBuf,
+        root: Option<PathBuf>,
+        context: &egui::Context,
+    ) {
+        let (sender, receiver) = mpsc::channel();
+        let context = context.clone();
+        std::thread::spawn(move || {
+            let result = (|| {
+                let mut store = match root {
+                    Some(root) => SqliteCatalog::create(&path, &root)?,
+                    None => SqliteCatalog::open(&path)?,
+                };
+                let report = store.rescan()?;
+                Ok((store, path, report))
+            })();
+            let _ = sender.send(result);
+            context.request_repaint();
+        });
+        self.catalog_task = Some(receiver);
+        self.status =
+            "SCANNING — 素材を登録しています。ファイル数・サイズにより時間がかかります。".into();
+    }
+
+    fn poll_catalog_task(&mut self) {
+        let Some(task) = &self.catalog_task else {
+            return;
+        };
+        let result = match task.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.catalog_task = None;
+                self.catalog = None;
+                self.plan = None;
+                self.selections.clear();
+                self.status =
+                    "CATALOG ERROR — フォルダ走査が中断されました。再走査してください。".into();
+                return;
+            }
+        };
+        self.catalog_task = None;
+        match result
+            .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
+        {
+            Ok((editor, path, report)) => {
+                self.editor = Some(editor);
+                self.catalog_path = Some(path);
+                self.reload_catalog();
+                self.status = format!(
+                    "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。区間を編集して GUIDE から候補を生成できます。",
+                    report.added, report.changed, report.missing, report.restored
+                );
+            }
+            Err(error) => {
+                // A failed rescan must not leave an old plan available for export.
+                self.plan = None;
+                self.catalog = None;
+                self.selections.clear();
+                self.status = format!("CATALOG ERROR — {error}");
+            }
+        }
+    }
+
+    fn reload_catalog(&mut self) {
+        if let Some(editor) = &self.editor {
+            match editor.store.candidate_catalog() {
+                Ok(catalog) => self.catalog = Some(catalog),
+                Err(error) => {
+                    self.catalog = None;
+                    self.status = format!("CATALOG ERROR — {error}");
+                }
+            }
+        }
+        self.plan = None;
+        self.selections.clear();
+        self.active_slot = None;
+        self.normalize_guide_roles();
+    }
+
     fn build_plan(&mut self) {
         let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
-            self.status = "CATALOG JSON を先に読み込んでください。".into();
+            self.status = "カタログを開くか、素材フォルダを再走査してください。".into();
             return;
         };
         let plan = create_plan(catalog, &guide_text);
@@ -190,7 +309,7 @@ impl StudioApp {
             theme::caption(ui, "01 / MATERIAL CATALOG");
             ui.label(
                 RichText::new(
-                    "実素材を使う場合は、素材フォルダと素材クリップを定義した catalog JSON を開きます。",
+                    "NEW CATALOG で素材フォルダを登録し、区間・タグを編集します。OPEN は保存済みカタログを開きます。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -207,29 +326,43 @@ impl StudioApp {
                 );
                 ui.add_space(4.0);
             }
-            if theme::action_button(
-                ui,
-                theme::ActionIcon::Open,
-                "OPEN",
-                false,
-                Vec2::new(106.0, 32.0),
-            )
-            .clicked()
-            {
-                self.open_catalog();
-            }
-            if self.catalog_path.is_some()
-                && theme::action_button(
+            ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
+                if ui.button("NEW CATALOG — 素材フォルダを登録").clicked() {
+                    self.create_catalog(ui.ctx());
+                }
+                if theme::action_button(
                     ui,
-                    theme::ActionIcon::Reset,
-                    "RESET TO DEMO CATALOG",
+                    theme::ActionIcon::Open,
+                    "OPEN",
                     false,
-                    Vec2::new(250.0, 32.0),
+                    Vec2::new(106.0, 32.0),
                 )
                 .clicked()
-            {
-                self.use_demo_catalog();
-            }
+                {
+                    self.open_catalog(ui.ctx());
+                }
+                if let Some(editor) = &mut self.editor {
+                    let (total, missing) = editor.counts();
+                    ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                    if ui.button("素材・区間・タグを編集").clicked() { editor.open = true; }
+                    if ui.button("RESCAN — フォルダを再走査").clicked()
+                        && let Some(path) = self.catalog_path.clone() {
+                        self.start_catalog_task(path,None,ui.ctx());
+                    }
+                }
+                if self.catalog_path.is_some()
+                    && theme::action_button(
+                        ui,
+                        theme::ActionIcon::Reset,
+                        "RESET TO DEMO CATALOG",
+                        false,
+                        Vec2::new(250.0, 32.0),
+                    )
+                    .clicked()
+                {
+                    self.use_demo_catalog();
+                }
+            });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -535,6 +668,14 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_catalog_task();
+        let busy = self.catalog_task.is_some();
+        if let Some(editor) = &mut self.editor
+            && editor.show(context, !busy)
+        {
+            self.reload_catalog();
+            self.status = "CATALOG SAVED — 区間を保存しました。候補を再生成してください。".into();
+        }
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::badge(ui, "SYSTEM", theme::AMBER);
@@ -551,12 +692,12 @@ impl eframe::App for StudioApp {
                         let controls = &mut columns[0];
                         self.show_catalog_controls(controls);
                         controls.add_space(8.0);
-                        self.show_guide_controls(controls);
+                        controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
                         controls.add_space(10.0);
                         self.show_candidate_grid(controls);
 
                         let stage = &mut columns[1];
-                        self.show_stage(stage);
+                        stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                     });
                 });
             });

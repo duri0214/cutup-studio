@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path};
 use thiserror::Error;
 
+pub mod catalog;
+
 pub const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Error)]
