@@ -186,7 +186,7 @@ pub fn action_button(
     if primary && enabled {
         button = button.fill(ACCENT).stroke(Stroke::new(1.0_f32, ACCENT));
     }
-    ui.horizontal(|ui| ui.add_sized(size, button)).inner
+    ui.add_sized(size, button)
 }
 
 fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {

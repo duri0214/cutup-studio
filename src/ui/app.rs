@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
@@ -103,25 +103,25 @@ impl StudioApp {
 
     fn create_catalog(&mut self, context: &egui::Context) {
         let Some(root) = rfd::FileDialog::new()
-            .set_title("登録する素材フォルダを選択")
+            .set_title("素材フォルダを選択（既存カタログは OPEN）")
             .pick_folder()
         else {
             return;
         };
-        let Some(directory) = rfd::FileDialog::new()
-            .set_title("カタログを置くフォルダを選択")
-            .pick_folder()
-        else {
-            return;
-        };
-        let path = match next_catalog_path(&directory) {
-            Ok(path) => path,
-            Err(error) => {
-                self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
+        let path = root.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => {
+                self.status = format!(
+                    "CATALOG EXISTS — {} はすでにあります。OPEN で開いてください。",
+                    path.display()
+                );
                 return;
             }
-        };
-        self.start_catalog_task(path, Some(root), context);
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
+            Err(error) => {
+                self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
+            }
+        }
     }
 
     fn start_catalog_task(
@@ -313,7 +313,7 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "01 / MATERIAL CATALOG");
             ui.label(
-                RichText::new("NEW は素材フォルダを登録します。")
+                RichText::new("NEW は選んだ素材フォルダ内に作成します。")
                     .size(11.0)
                     .color(theme::MUTED),
             );
@@ -731,21 +731,6 @@ fn manifest_save_directory() -> PathBuf {
         .map(|profile| profile.join("Downloads"))
         .filter(|directory| directory.is_dir())
         .unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn next_catalog_path(directory: &Path) -> Result<PathBuf, std::io::Error> {
-    for number in 1_u32.. {
-        let name = if number == 1 {
-            "material-catalog.sqlite".to_owned()
-        } else {
-            format!("material-catalog-{number}.sqlite")
-        };
-        let path = directory.join(name);
-        if !path.try_exists()? {
-            return Ok(path);
-        }
-    }
-    unreachable!("u32 のファイル名候補を使い切ることはありません")
 }
 
 fn demo_guide_inputs() -> Vec<GuideInput> {
