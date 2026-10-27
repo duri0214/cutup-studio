@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
@@ -108,13 +108,18 @@ impl StudioApp {
         else {
             return;
         };
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("新しいカタログの保存先（既存ファイルは上書きしません）")
-            .set_file_name("material-catalog.sqlite")
-            .add_filter("SQLite カタログ", &["sqlite"])
-            .save_file()
+        let Some(directory) = rfd::FileDialog::new()
+            .set_title("カタログを置くフォルダを選択")
+            .pick_folder()
         else {
             return;
+        };
+        let path = match next_catalog_path(&directory) {
+            Ok(path) => path,
+            Err(error) => {
+                self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
+                return;
+            }
         };
         self.start_catalog_task(path, Some(root), context);
     }
@@ -720,6 +725,21 @@ fn manifest_save_directory() -> PathBuf {
         .map(|profile| profile.join("Downloads"))
         .filter(|directory| directory.is_dir())
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn next_catalog_path(directory: &Path) -> Result<PathBuf, std::io::Error> {
+    for number in 1_u32.. {
+        let name = if number == 1 {
+            "material-catalog.sqlite".to_owned()
+        } else {
+            format!("material-catalog-{number}.sqlite")
+        };
+        let path = directory.join(name);
+        if !path.try_exists()? {
+            return Ok(path);
+        }
+    }
+    unreachable!("u32 のファイル名候補を使い切ることはありません")
 }
 
 fn demo_guide_inputs() -> Vec<GuideInput> {
