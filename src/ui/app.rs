@@ -327,20 +327,30 @@ impl StudioApp {
                 ui.add_space(4.0);
             }
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
-                if ui.button("NEW CATALOG — 素材フォルダを登録").clicked() {
-                    self.create_catalog(ui.ctx());
-                }
-                if theme::action_button(
-                    ui,
-                    theme::ActionIcon::Open,
-                    "OPEN",
-                    false,
-                    Vec2::new(106.0, 32.0),
-                )
-                .clicked()
-                {
-                    self.open_catalog(ui.ctx());
-                }
+                ui.horizontal(|ui| {
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::Open,
+                        "NEW",
+                        false,
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.create_catalog(ui.ctx());
+                    }
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::Open,
+                        "OPEN",
+                        false,
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.open_catalog(ui.ctx());
+                    }
+                });
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
