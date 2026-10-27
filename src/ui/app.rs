@@ -879,11 +879,11 @@ fn demo_guide_inputs() -> Vec<GuideInput> {
     vec![
         GuideInput {
             role: "導入".into(),
-            query: "テッカマン".into(),
+            query: "テスト 映像".into(),
         },
         GuideInput {
             role: "つなぎ".into(),
-            query: "驚き 反応".into(),
+            query: "花 アニメーション".into(),
         },
     ]
 }
@@ -898,56 +898,104 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 }
 
 fn demo_catalog() -> Catalog {
+    let samples = [
+        (
+            "01-1080p-h264",
+            "01-1080p-h264.mp4",
+            "テスト映像の導入",
+            "導入",
+            "テスト",
+        ),
+        (
+            "02-1080p-h265",
+            "02-1080p-h265.mp4",
+            "高圧縮のテスト映像",
+            "導入",
+            "テスト",
+        ),
+        (
+            "03-360p-h264",
+            "03-360p-h264.mp4",
+            "低解像度のテスト映像",
+            "導入",
+            "テスト",
+        ),
+        (
+            "04-480p-30s",
+            "04-480p-30s.mp4",
+            "30秒のテスト映像",
+            "導入",
+            "テスト",
+        ),
+        (
+            "05-720p-60fps",
+            "05-720p-60fps.mp4",
+            "高フレームレートのテスト映像",
+            "導入",
+            "テスト",
+        ),
+        (
+            "06-720p-h264",
+            "06-720p-h264.mp4",
+            "標準的なテスト映像",
+            "導入",
+            "テスト",
+        ),
+        (
+            "07-720p-silent",
+            "07-720p-silent.mp4",
+            "無音のテスト映像",
+            "つなぎ",
+            "アニメーション",
+        ),
+        (
+            "08-vertical-1080p",
+            "08-vertical-1080p.mp4",
+            "縦長のテスト映像",
+            "つなぎ",
+            "アニメーション",
+        ),
+        (
+            "09-big-buck-bunny",
+            "09-big-buck-bunny.mp4",
+            "アニメーションの場面",
+            "つなぎ",
+            "アニメーション",
+        ),
+        (
+            "10-flower",
+            "10-flower.mp4",
+            "花のアニメーション",
+            "つなぎ",
+            "花",
+        ),
+    ];
     Catalog {
         schema_version: SCHEMA_VERSION,
-        material_root: "組み込みデモ（素材ファイルなし）".into(),
-        segments: vec![
-            Segment {
-                id: "demo-tekkaman-intro".into(),
-                source_path: "demo/tekkaman-intro.mp4".into(),
-                start_ms: 1200,
-                end_ms: 4500,
-                transcript: "テッカマンが登場する導入シーン".into(),
-                keywords: vec!["テッカマン".into(), "登場".into()],
-                tags: vec!["導入".into(), "画".into()],
-                roles: vec!["導入".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-tekkaman-closeup".into(),
-                source_path: "demo/tekkaman-closeup.mp4".into(),
-                start_ms: 8000,
-                end_ms: 10500,
-                transcript: "テッカマンのクローズアップ".into(),
-                keywords: vec!["テッカマン".into(), "クローズアップ".into()],
-                tags: vec!["導入".into(), "画".into()],
-                roles: vec!["導入".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-surprised-reaction".into(),
-                source_path: "demo/surprised-reaction.mp4".into(),
-                start_ms: 8400,
-                end_ms: 10400,
-                transcript: "えっ、という驚きの反応".into(),
-                keywords: vec!["驚き".into(), "反応".into()],
-                tags: vec!["反応".into(), "つなぎ".into()],
-                roles: vec!["つなぎ".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-quick-reaction".into(),
-                source_path: "demo/quick-reaction.mp4".into(),
-                start_ms: 2000,
-                end_ms: 3600,
-                transcript: "短い驚きのリアクション".into(),
-                keywords: vec!["驚き".into(), "反応".into()],
-                tags: vec!["反応".into(), "つなぎ".into()],
-                roles: vec!["つなぎ".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-        ],
+        material_root: example_material_root(),
+        segments: samples
+            .into_iter()
+            .map(|(id, source_path, transcript, role, tag)| Segment {
+                id: format!("demo-{id}"),
+                source_path: source_path.into(),
+                start_ms: 0,
+                end_ms: 1000,
+                transcript: transcript.into(),
+                keywords: vec![tag.into()],
+                tags: vec![tag.into(), role.into()],
+                roles: vec![role.into()],
+                note: "examples/materials の同梱サンプル".into(),
+            })
+            .collect(),
     }
+}
+
+fn example_material_root() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("materials")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
