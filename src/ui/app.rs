@@ -303,7 +303,7 @@ impl StudioApp {
         };
         let dialog = rfd::FileDialog::new()
             .set_file_name("composition-manifest.json")
-            .set_directory(manifest_save_directory());
+            .set_directory(&plan.material_root);
         let Some(path) = dialog.save_file() else {
             return;
         };
@@ -751,7 +751,7 @@ impl StudioApp {
             });
             ui.label(
                 RichText::new(
-                    "確定する順序。SAVE MANIFEST で composition-manifest.json を Downloads に出力します。",
+                    "確定する順序。SAVE MANIFEST で composition-manifest.json を素材フォルダへ保存します。",
                 )
                     .size(11.0)
                     .color(theme::MUTED),
@@ -858,14 +858,6 @@ impl eframe::App for StudioApp {
                 });
             });
     }
-}
-
-fn manifest_save_directory() -> PathBuf {
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .map(|profile| profile.join("Downloads"))
-        .filter(|directory| directory.is_dir())
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn section_header(ui: &mut Ui, title: &str, signal: theme::Signal, detail: &str) {
