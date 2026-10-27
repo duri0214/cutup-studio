@@ -10,7 +10,7 @@ use crate::{
     domain::valueobject::catalog::ScanReport,
     domain::{
         service::{create_plan, manifest_from_plan},
-        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment},
+        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
     },
     infra::catalog_file::{load_catalog, save_manifest},
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
@@ -30,6 +30,7 @@ struct GuideInput {
 pub struct StudioApp {
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
+    demo_mode: bool,
     editor: Option<CatalogEditor>,
     catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
@@ -46,6 +47,7 @@ impl StudioApp {
         Self {
             catalog: None,
             catalog_path: None,
+            demo_mode: false,
             editor: None,
             catalog_task: None,
             guide_inputs: Vec::new(),
@@ -80,6 +82,7 @@ impl StudioApp {
                 self.editor = None;
                 self.catalog_path = Some(path);
                 self.catalog = Some(catalog);
+                self.demo_mode = false;
                 self.normalize_guide_roles();
                 self.plan = None;
                 self.selections.clear();
@@ -97,6 +100,7 @@ impl StudioApp {
     fn clear_active_catalog(&mut self) {
         self.catalog = None;
         self.catalog_path = None;
+        self.demo_mode = false;
         self.editor = None;
         self.plan = None;
         self.selections.clear();
@@ -104,20 +108,29 @@ impl StudioApp {
         self.dragged_guide_index = None;
     }
 
-    fn use_demo_catalog(&mut self) {
-        self.editor = None;
-        self.catalog = Some(demo_catalog());
-        self.catalog_path = None;
-        self.guide_inputs = demo_guide_inputs();
-        self.plan = None;
-        self.selections.clear();
-        self.active_slot = None;
-        self.dragged_guide_index = None;
-        self.status = "DEMO READY — GUIDE を生成して候補を確認できます。".into();
+    fn use_demo_catalog(&mut self, context: &egui::Context) {
+        let directory = std::env::temp_dir().join("cutup-studio-demo");
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            self.clear_active_catalog();
+            self.status = format!("CATALOG ERROR — DEMO の保存先を作成できません: {error}");
+            return;
+        }
+        let path = directory.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => self.start_catalog_task(path, None, context),
+            Ok(false) => self.start_catalog_task(path, Some(demo_material_root()), context),
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — DEMO の保存先を確認できません: {error}");
+                return;
+            }
+        }
+        self.demo_mode = true;
+        self.guide_inputs.clear();
     }
 
     fn is_demo_catalog(&self) -> bool {
-        self.catalog.is_some() && self.catalog_path.is_none() && self.catalog_task.is_none()
+        self.demo_mode
     }
 
     fn create_catalog(&mut self, context: &egui::Context) {
@@ -318,10 +331,10 @@ impl StudioApp {
             (theme::Signal::Attention, theme::AMBER, "SCANNING")
         } else if self.catalog.is_none() {
             (theme::Signal::Attention, theme::AMBER, "NO CATALOG")
-        } else if self.catalog_path.is_some() {
-            (theme::Signal::Ready, theme::ACCENT, "READY")
-        } else {
+        } else if self.is_demo_catalog() {
             (theme::Signal::Ready, theme::ACCENT, "DEMO")
+        } else {
+            (theme::Signal::Ready, theme::ACCENT, "READY")
         }
     }
 
@@ -459,7 +472,7 @@ impl StudioApp {
                         )
                         .clicked()
                         {
-                            self.use_demo_catalog();
+                            self.use_demo_catalog(ui.ctx());
                         }
                         ui.add_sized(
                             Vec2::new(106.0, 22.0),
@@ -507,13 +520,8 @@ impl StudioApp {
             });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
-                    let label = if self.catalog_path.is_some() {
-                        "登録済みの素材クリップ"
-                    } else {
-                        "デモ素材クリップ"
-                    };
                     ui.label(
-                        RichText::new(format!("{label}: {} 件", catalog.segments.len()))
+                        RichText::new(format!("登録済みの区間: {} 件", catalog.segments.len()))
                             .size(10.0)
                             .color(theme::MUTED),
                     );
@@ -875,19 +883,6 @@ fn section_header(ui: &mut Ui, title: &str, signal: theme::Signal, detail: &str)
     });
 }
 
-fn demo_guide_inputs() -> Vec<GuideInput> {
-    vec![
-        GuideInput {
-            role: "導入".into(),
-            query: "テスト 映像".into(),
-        },
-        GuideInput {
-            role: "つなぎ".into(),
-            query: "花 アニメーション".into(),
-        },
-    ]
-}
-
 fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
     guide_inputs
         .iter()
@@ -897,105 +892,10 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
         .join("\n")
 }
 
-fn demo_catalog() -> Catalog {
-    let samples = [
-        (
-            "01-1080p-h264",
-            "01-1080p-h264.mp4",
-            "テスト映像の導入",
-            "導入",
-            "テスト",
-        ),
-        (
-            "02-1080p-h265",
-            "02-1080p-h265.mp4",
-            "高圧縮のテスト映像",
-            "導入",
-            "テスト",
-        ),
-        (
-            "03-360p-h264",
-            "03-360p-h264.mp4",
-            "低解像度のテスト映像",
-            "導入",
-            "テスト",
-        ),
-        (
-            "04-480p-30s",
-            "04-480p-30s.mp4",
-            "30秒のテスト映像",
-            "導入",
-            "テスト",
-        ),
-        (
-            "05-720p-60fps",
-            "05-720p-60fps.mp4",
-            "高フレームレートのテスト映像",
-            "導入",
-            "テスト",
-        ),
-        (
-            "06-720p-h264",
-            "06-720p-h264.mp4",
-            "標準的なテスト映像",
-            "導入",
-            "テスト",
-        ),
-        (
-            "07-720p-silent",
-            "07-720p-silent.mp4",
-            "無音のテスト映像",
-            "つなぎ",
-            "アニメーション",
-        ),
-        (
-            "08-vertical-1080p",
-            "08-vertical-1080p.mp4",
-            "縦長のテスト映像",
-            "つなぎ",
-            "アニメーション",
-        ),
-        (
-            "09-big-buck-bunny",
-            "09-big-buck-bunny.mp4",
-            "アニメーションの場面",
-            "つなぎ",
-            "アニメーション",
-        ),
-        (
-            "10-flower",
-            "10-flower.mp4",
-            "花のアニメーション",
-            "つなぎ",
-            "花",
-        ),
-    ];
-    Catalog {
-        schema_version: SCHEMA_VERSION,
-        material_root: demo_material_root(),
-        segments: samples
-            .into_iter()
-            .map(|(id, source_path, transcript, role, tag)| Segment {
-                id: format!("demo-{id}"),
-                source_path: source_path.into(),
-                start_ms: 0,
-                end_ms: 1000,
-                transcript: transcript.into(),
-                keywords: vec![tag.into()],
-                tags: vec![tag.into(), role.into()],
-                roles: vec![role.into()],
-                note: "demo/materials の同梱サンプル".into(),
-            })
-            .collect(),
-    }
-}
-
-fn demo_material_root() -> String {
+fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("demo")
         .join("materials")
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
@@ -1083,20 +983,4 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         );
     }
     response.clicked()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn demo_catalog_generates_candidates_for_the_default_guide() {
-        let catalog = demo_catalog();
-        catalog.validate_metadata().unwrap();
-
-        let plan = create_plan(&catalog, &guide_text_from_inputs(&demo_guide_inputs()));
-
-        assert_eq!(plan.slots.len(), 2);
-        assert!(plan.slots.iter().all(|slot| !slot.candidates.is_empty()));
-    }
 }
