@@ -235,7 +235,7 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
             "../../assets/icons/lucide/folder-plus.svg"
         )),
         ActionIcon::Open => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/folder-open.svg"
+            "../../assets/icons/lucide/file-open.svg"
         )),
         ActionIcon::Generate => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/wand-sparkles.svg"

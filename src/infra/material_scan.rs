@@ -9,14 +9,13 @@ pub(super) struct ScannedMaterial {
 }
 
 pub(super) fn scan(root: &Path) -> Result<Vec<ScannedMaterial>, CatalogError> {
-    match root.canonicalize() {
-        Ok(actual) if actual != root => return Err(CatalogError::OutsideRoot),
-        Ok(_) => {}
+    let root = match root.canonicalize() {
+        Ok(root) => root,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error.into()),
-    }
+    };
     let mut files = Vec::new();
-    visit(root, root, &mut files)?;
+    visit(&root, &root, &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }

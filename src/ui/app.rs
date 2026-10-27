@@ -61,7 +61,7 @@ impl StudioApp {
 
     fn open_catalog(&mut self, context: &egui::Context) {
         let Some(path) = rfd::FileDialog::new()
-            .set_title("保存済みカタログを開く")
+            .set_title("保存済みカタログファイルを選択（SQLite または JSON）")
             .add_filter("SQLite カタログ", &["sqlite", "db", "sqlite3"])
             .add_filter("既存の catalog JSON", &["json"])
             .pick_file()
@@ -398,12 +398,12 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
-                RichText::new("NEW は選んだ素材フォルダ内に作成します。")
+                RichText::new("NEW は素材フォルダを選び、その中に material-catalog.sqlite を作成します。")
                     .size(11.0)
                     .color(theme::MUTED),
             );
             ui.label(
-                RichText::new("OPEN は保存済みカタログを開きます。")
+                RichText::new("OPEN は既存の material-catalog.sqlite ファイルを選びます。")
                     .size(11.0)
                     .color(theme::MUTED),
             );
