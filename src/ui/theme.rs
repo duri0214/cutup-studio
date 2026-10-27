@@ -24,6 +24,13 @@ pub enum ActionIcon {
     Delete,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    Error,
+    Attention,
+    Ready,
+}
+
 pub fn install(context: &Context) {
     egui_extras::install_image_loaders(context);
     install_japanese_font(context);
@@ -108,6 +115,32 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(10.0).strong().color(color));
         });
+}
+
+pub fn traffic_light(ui: &mut Ui, active: Signal) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(8, 11, 15));
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0_f32, BORDER),
+        StrokeKind::Inside,
+    );
+    for (signal, color, offset) in [
+        (Signal::Error, RED, 8.0),
+        (Signal::Attention, AMBER, 19.0),
+        (Signal::Ready, ACCENT, 30.0),
+    ] {
+        let color = if signal == active {
+            color
+        } else {
+            color.gamma_multiply(0.18)
+        };
+        ui.painter()
+            .circle_filled(Pos2::new(rect.center().x, rect.top() + offset), 3.5, color);
+    }
+    response
 }
 
 pub fn role_badge(ui: &mut Ui, text: &str, color: Color32) {

@@ -279,7 +279,23 @@ impl StudioApp {
         }
     }
 
+    fn system_status(&self) -> (theme::Signal, Color32, &'static str) {
+        if self.status.starts_with("CATALOG ERROR")
+            || self.status.starts_with("CATALOG EXISTS")
+            || self.status.starts_with("MANIFEST ERROR")
+        {
+            (theme::Signal::Error, theme::RED, "ERROR")
+        } else if self.catalog_task.is_some() {
+            (theme::Signal::Attention, theme::AMBER, "SCANNING")
+        } else if self.catalog_path.is_some() {
+            (theme::Signal::Ready, theme::ACCENT, "READY")
+        } else {
+            (theme::Signal::Attention, theme::AMBER, "DEMO")
+        }
+    }
+
     fn show_header(&self, ui: &mut Ui) {
+        let (signal, status_color, status_label) = self.system_status();
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             ui.label(
@@ -290,10 +306,11 @@ impl StudioApp {
             );
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.horizontal(|ui| {
+                    theme::traffic_light(ui, signal).on_hover_text(&self.status);
+                    theme::badge(ui, status_label, status_color);
+                });
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
-                if self.catalog_path.is_none() {
-                    theme::badge(ui, "DEMO", theme::AMBER);
-                }
                 ui.label(
                     RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
                         .monospace()
@@ -697,9 +714,10 @@ impl eframe::App for StudioApp {
             self.reload_catalog();
             self.status = "CATALOG SAVED — 区間を保存しました。候補を再生成してください。".into();
         }
+        let (_, status_color, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
-                theme::badge(ui, "SYSTEM", theme::AMBER);
+                theme::badge(ui, status_label, status_color);
                 ui.label(RichText::new(&self.status).size(11.0).color(theme::MUTED));
             });
         });
