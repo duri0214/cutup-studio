@@ -109,19 +109,14 @@ impl StudioApp {
     }
 
     fn use_demo_catalog(&mut self, context: &egui::Context) {
-        let directory = std::env::temp_dir().join("cutup-studio-demo");
-        if let Err(error) = std::fs::create_dir_all(&directory) {
-            self.clear_active_catalog();
-            self.status = format!("CATALOG ERROR — DEMO の保存先を作成できません: {error}");
-            return;
-        }
-        let path = directory.join("material-catalog.sqlite");
+        let root = demo_material_root();
+        let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => self.start_catalog_task(path, None, context),
-            Ok(false) => self.start_catalog_task(path, Some(demo_material_root()), context),
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
             Err(error) => {
                 self.clear_active_catalog();
-                self.status = format!("CATALOG ERROR — DEMO の保存先を確認できません: {error}");
+                self.status = format!("CATALOG ERROR — DEMO のカタログを確認できません: {error}");
                 return;
             }
         }
@@ -893,9 +888,7 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 }
 
 fn demo_material_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("demo")
-        .join("materials")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
