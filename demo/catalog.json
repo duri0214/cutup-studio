@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "material_root": "examples/materials",
+  "material_root": "demo/materials",
   "segments": [
     { "id": "sample-intro", "source_path": "01-1080p-h264.mp4", "start_ms": 0, "end_ms": 1000, "transcript": "テスト映像の導入", "keywords": ["テスト"], "tags": ["テスト", "導入"], "roles": ["導入"], "note": "同梱MP4の確認用" },
     { "id": "sample-flower", "source_path": "10-flower.mp4", "start_ms": 0, "end_ms": 1000, "transcript": "花のアニメーション", "keywords": ["花"], "tags": ["花", "アニメーション"], "roles": ["つなぎ"], "note": "同梱MP4の確認用" }

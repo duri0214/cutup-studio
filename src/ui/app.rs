@@ -972,7 +972,7 @@ fn demo_catalog() -> Catalog {
     ];
     Catalog {
         schema_version: SCHEMA_VERSION,
-        material_root: example_material_root(),
+        material_root: demo_material_root(),
         segments: samples
             .into_iter()
             .map(|(id, source_path, transcript, role, tag)| Segment {
@@ -984,15 +984,15 @@ fn demo_catalog() -> Catalog {
                 keywords: vec![tag.into()],
                 tags: vec![tag.into(), role.into()],
                 roles: vec![role.into()],
-                note: "examples/materials の同梱サンプル".into(),
+                note: "demo/materials の同梱サンプル".into(),
             })
             .collect(),
     }
 }
 
-fn example_material_root() -> String {
+fn demo_material_root() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples")
+        .join("demo")
         .join("materials")
         .to_string_lossy()
         .into_owned()
