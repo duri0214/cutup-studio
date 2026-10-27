@@ -89,6 +89,15 @@ impl CatalogEditor {
     fn controls(&mut self, ui: &mut Ui) -> bool {
         ui.label("素材を選び、開始・終了時刻と検索に使う語句を入力します。時間はミリ秒です。");
         ui.label("動画再生・自動解析は未対応です。外部プレイヤーで区間を確認してください。");
+        if self.materials.is_empty() {
+            ui.separator();
+            ui.strong("まだ編集できる素材がありません。");
+            ui.label("SQLite カタログだけが作成されており、素材ファイルは登録されていません。");
+            ui.label("1. 選んだ素材フォルダに動画または音声ファイルを入れます。");
+            ui.label("2. この画面を閉じ、01 / MATERIAL CATALOG の RESCAN を押します。");
+            ui.label("3. 素材が表示されたら、この画面で区間とタグを登録します。");
+            return false;
+        }
         let selected = self.material_id;
         egui::ComboBox::from_id_salt("material")
             .width(640.0)

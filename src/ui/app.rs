@@ -190,14 +190,20 @@ impl StudioApp {
         match result
             .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
         {
-            Ok((editor, path, report)) => {
+            Ok((mut editor, path, report)) => {
+                let (total, _) = editor.counts();
+                editor.open = total > 0;
                 self.editor = Some(editor);
                 self.catalog_path = Some(path);
                 self.reload_catalog();
-                self.status = format!(
-                    "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。区間を編集して GUIDE から候補を生成できます。",
-                    report.added, report.changed, report.missing, report.restored
-                );
+                self.status = if total == 0 {
+                    "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて RESCAN してください。".into()
+                } else {
+                    format!(
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。区間を編集して GUIDE から候補を生成できます。",
+                        report.added, report.changed, report.missing, report.restored
+                    )
+                };
             }
             Err(error) => {
                 // A failed rescan must not leave an old plan available for export.
@@ -451,13 +457,26 @@ impl StudioApp {
                 });
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
-                    ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
-                    if ui.button("素材・区間・タグを編集").clicked() {
-                        editor.open = true;
-                    }
-                    if ui.button("RESCAN — フォルダを再走査").clicked()
-                        && let Some(path) = self.catalog_path.clone()
-                    {
+                    let rescan = if total == 0 {
+                        ui.label(
+                            "素材ファイル: 0 件 — 素材をフォルダへ入れてから再走査してください。",
+                        );
+                        theme::action_button(
+                            ui,
+                            theme::ActionIcon::Reset,
+                            "RESCAN — フォルダを再走査",
+                            true,
+                            Vec2::new(250.0, 32.0),
+                        )
+                        .clicked()
+                    } else {
+                        ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                        if ui.button("素材・区間・タグを編集").clicked() {
+                            editor.open = true;
+                        }
+                        ui.button("RESCAN — フォルダを再走査").clicked()
+                    };
+                    if rescan && let Some(path) = self.catalog_path.clone() {
                         self.start_catalog_task(path, None, ui.ctx());
                     }
                 }
