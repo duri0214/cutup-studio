@@ -116,6 +116,10 @@ impl StudioApp {
         self.status = "DEMO READY — GUIDE を生成して候補を確認できます。".into();
     }
 
+    fn is_demo_catalog(&self) -> bool {
+        self.catalog.is_some() && self.catalog_path.is_none() && self.catalog_task.is_none()
+    }
+
     fn create_catalog(&mut self, context: &egui::Context) {
         let Some(root) = rfd::FileDialog::new()
             .set_title("素材フォルダを選択（既存カタログは OPEN）")
@@ -311,7 +315,7 @@ impl StudioApp {
         } else if self.catalog_path.is_some() {
             (theme::Signal::Ready, theme::ACCENT, "READY")
         } else {
-            (theme::Signal::Attention, theme::AMBER, "DEMO")
+            (theme::Signal::Ready, theme::ACCENT, "DEMO")
         }
     }
 
@@ -365,12 +369,8 @@ impl StudioApp {
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
-                if self.catalog.is_some()
-                    && self.catalog_path.is_none()
-                    && self.catalog_task.is_none()
-                    && signal != theme::Signal::Error
-                {
-                    theme::badge(ui, "DEMO", theme::AMBER);
+                if self.is_demo_catalog() && signal != theme::Signal::Error {
+                    theme::badge(ui, "DEMO", theme::ACCENT);
                 }
                 ui.label(
                     RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
@@ -441,7 +441,7 @@ impl StudioApp {
                         ui,
                         theme::ActionIcon::Reset,
                         "DEMO",
-                        false,
+                        self.is_demo_catalog(),
                         Vec2::new(106.0, 32.0),
                     )
                     .clicked()
