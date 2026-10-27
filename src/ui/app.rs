@@ -113,7 +113,7 @@ impl StudioApp {
         self.selections.clear();
         self.active_slot = None;
         self.dragged_guide_index = None;
-        self.status = "READY — GUIDE を生成して候補を確認できます。".into();
+        self.status = "DEMO READY — GUIDE を生成して候補を確認できます。".into();
     }
 
     fn create_catalog(&mut self, context: &egui::Context) {
@@ -437,6 +437,17 @@ impl StudioApp {
                     {
                         self.open_catalog(ui.ctx());
                     }
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::Reset,
+                        "DEMO",
+                        false,
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.use_demo_catalog();
+                    }
                 });
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
@@ -449,18 +460,6 @@ impl StudioApp {
                     {
                         self.start_catalog_task(path, None, ui.ctx());
                     }
-                }
-                if self.catalog_path.is_some()
-                    && theme::action_button(
-                        ui,
-                        theme::ActionIcon::Reset,
-                        "RESET TO DEMO CATALOG",
-                        false,
-                        Vec2::new(250.0, 32.0),
-                    )
-                    .clicked()
-                {
-                    self.use_demo_catalog();
                 }
             });
             if let Some(catalog) = &self.catalog {
