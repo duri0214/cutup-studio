@@ -85,8 +85,21 @@ impl StudioApp {
                 self.dragged_guide_index = None;
                 self.status = "CATALOG READY — ガイドから候補を生成できます。".into();
             }
-            Err(error) => self.status = format!("CATALOG ERROR — {error}"),
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — {error}");
+            }
         }
+    }
+
+    fn clear_active_catalog(&mut self) {
+        self.catalog = None;
+        self.catalog_path = None;
+        self.editor = None;
+        self.plan = None;
+        self.selections.clear();
+        self.active_slot = None;
+        self.dragged_guide_index = None;
     }
 
     fn use_demo_catalog(&mut self) {
@@ -111,6 +124,7 @@ impl StudioApp {
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => {
+                self.clear_active_catalog();
                 self.status = format!(
                     "CATALOG EXISTS — {} はすでにあります。OPEN で開いてください。",
                     path.display()
@@ -119,6 +133,7 @@ impl StudioApp {
             }
             Ok(false) => self.start_catalog_task(path, Some(root), context),
             Err(error) => {
+                self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
             }
         }
@@ -130,6 +145,7 @@ impl StudioApp {
         root: Option<PathBuf>,
         context: &egui::Context,
     ) {
+        self.clear_active_catalog();
         let (sender, receiver) = mpsc::channel();
         let context = context.clone();
         std::thread::spawn(move || {
@@ -158,9 +174,7 @@ impl StudioApp {
             Err(TryRecvError::Empty) => return,
             Err(TryRecvError::Disconnected) => {
                 self.catalog_task = None;
-                self.catalog = None;
-                self.plan = None;
-                self.selections.clear();
+                self.clear_active_catalog();
                 self.status =
                     "CATALOG ERROR — フォルダ走査が中断されました。再走査してください。".into();
                 return;
@@ -181,21 +195,24 @@ impl StudioApp {
             }
             Err(error) => {
                 // A failed rescan must not leave an old plan available for export.
-                self.plan = None;
-                self.catalog = None;
-                self.selections.clear();
+                self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — {error}");
             }
         }
     }
 
     fn reload_catalog(&mut self) {
-        if let Some(editor) = &self.editor {
-            match editor.store.candidate_catalog() {
+        let result = self
+            .editor
+            .as_ref()
+            .map(|editor| editor.store.candidate_catalog());
+        if let Some(result) = result {
+            match result {
                 Ok(catalog) => self.catalog = Some(catalog),
                 Err(error) => {
-                    self.catalog = None;
+                    self.clear_active_catalog();
                     self.status = format!("CATALOG ERROR — {error}");
+                    return;
                 }
             }
         }
@@ -422,6 +439,12 @@ impl StudioApp {
                         );
                     }
                 });
+            } else {
+                ui.label(
+                    RichText::new("カタログは選択されていません。")
+                        .size(10.0)
+                        .color(theme::MUTED),
+                );
             }
         });
     }
