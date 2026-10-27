@@ -44,16 +44,18 @@ impl StudioApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
         theme::install(&creation_context.egui_ctx);
         Self {
-            catalog: Some(demo_catalog()),
+            catalog: None,
             catalog_path: None,
             editor: None,
             catalog_task: None,
-            guide_inputs: demo_guide_inputs(),
+            guide_inputs: Vec::new(),
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
-            status: "READY — GUIDE を生成して候補を確認できます。".into(),
+            status:
+                "NO CATALOG — NEW で素材フォルダを登録するか、OPEN で既存カタログを開いてください。"
+                    .into(),
         }
     }
 
@@ -304,6 +306,8 @@ impl StudioApp {
             (theme::Signal::Error, theme::RED, "ERROR")
         } else if self.catalog_task.is_some() {
             (theme::Signal::Attention, theme::AMBER, "SCANNING")
+        } else if self.catalog.is_none() {
+            (theme::Signal::Attention, theme::AMBER, "NO CATALOG")
         } else if self.catalog_path.is_some() {
             (theme::Signal::Ready, theme::ACCENT, "READY")
         } else {
@@ -361,7 +365,8 @@ impl StudioApp {
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
-                if self.catalog_path.is_none()
+                if self.catalog.is_some()
+                    && self.catalog_path.is_none()
                     && self.catalog_task.is_none()
                     && signal != theme::Signal::Error
                 {
@@ -460,13 +465,15 @@ impl StudioApp {
             });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
+                    let label = if self.catalog_path.is_some() {
+                        "登録済みの素材クリップ"
+                    } else {
+                        "デモ素材クリップ"
+                    };
                     ui.label(
-                        RichText::new(format!(
-                            "登録済みの素材クリップ: {} 件",
-                            catalog.segments.len()
-                        ))
-                        .size(10.0)
-                        .color(theme::MUTED),
+                        RichText::new(format!("{label}: {} 件", catalog.segments.len()))
+                            .size(10.0)
+                            .color(theme::MUTED),
                     );
                     if self.catalog_path.is_some() {
                         ui.add(

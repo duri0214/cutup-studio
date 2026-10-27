@@ -15,7 +15,7 @@ pub enum CatalogFileError {
         source: serde_json::Error,
     },
     #[error(
-        "{path} は出力済みの manifest です。素材を探すには catalog JSON を選ぶか、組み込みデモを使ってください"
+        "{path} は出力済みの manifest です。素材を探すには catalog JSON または SQLite カタログを選んでください"
     )]
     ManifestSelected { path: String },
     #[error("素材ルートは存在するディレクトリを指定してください: {0}")]
