@@ -313,7 +313,10 @@ impl StudioApp {
 
     fn guide_status(&self) -> (theme::Signal, &'static str) {
         if self.catalog.is_none() {
-            (theme::Signal::Error, "素材カタログを開いてください")
+            (
+                theme::Signal::Attention,
+                "01 の素材カタログを開いてください",
+            )
         } else if self.plan.is_some() {
             (theme::Signal::Ready, "GUIDE から候補を生成済みです")
         } else {
@@ -326,15 +329,22 @@ impl StudioApp {
 
     fn candidates_status(&self) -> (theme::Signal, &'static str) {
         if self.catalog.is_none() {
-            (theme::Signal::Error, "素材カタログを開いてください")
-        } else if self
-            .plan
-            .as_ref()
-            .is_some_and(|plan| plan.slots.iter().any(|slot| !slot.candidates.is_empty()))
-        {
-            (theme::Signal::Ready, "候補を選択できます")
+            (
+                theme::Signal::Attention,
+                "01 の素材カタログを開いてください",
+            )
+        } else if let Some(plan) = &self.plan {
+            let active_index = self.active_slot.unwrap_or_default();
+            match plan.slots.get(active_index) {
+                Some(slot) if slot.candidates.is_empty() => (
+                    theme::Signal::Error,
+                    "候補がありません。GUIDE の語句・タグ・役割を確認してください",
+                ),
+                Some(_) => (theme::Signal::Ready, "候補を選択できます"),
+                None => (theme::Signal::Attention, "02 で GUIDE を生成してください"),
+            }
         } else {
-            (theme::Signal::Attention, "GUIDE から候補を生成してください")
+            (theme::Signal::Attention, "02 で GUIDE を生成してください")
         }
     }
 
