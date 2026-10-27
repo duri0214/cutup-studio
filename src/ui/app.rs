@@ -311,8 +311,35 @@ impl StudioApp {
         }
     }
 
+    fn guide_status(&self) -> (theme::Signal, &'static str) {
+        if self.catalog.is_none() {
+            (theme::Signal::Error, "素材カタログを開いてください")
+        } else if self.plan.is_some() {
+            (theme::Signal::Ready, "GUIDE から候補を生成済みです")
+        } else {
+            (
+                theme::Signal::Attention,
+                "GUIDE を入力して候補を生成してください",
+            )
+        }
+    }
+
+    fn candidates_status(&self) -> (theme::Signal, &'static str) {
+        if self.catalog.is_none() {
+            (theme::Signal::Error, "素材カタログを開いてください")
+        } else if self
+            .plan
+            .as_ref()
+            .is_some_and(|plan| plan.slots.iter().any(|slot| !slot.candidates.is_empty()))
+        {
+            (theme::Signal::Ready, "候補を選択できます")
+        } else {
+            (theme::Signal::Attention, "GUIDE から候補を生成してください")
+        }
+    }
+
     fn show_header(&self, ui: &mut Ui) {
-        let (signal, status_color, status_label) = self.system_status();
+        let (signal, _, _) = self.system_status();
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             ui.label(
@@ -323,11 +350,13 @@ impl StudioApp {
             );
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.horizontal(|ui| {
-                    theme::traffic_light(ui, signal).on_hover_text(&self.status);
-                    theme::badge(ui, status_label, status_color);
-                });
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
+                if self.catalog_path.is_none()
+                    && self.catalog_task.is_none()
+                    && signal != theme::Signal::Error
+                {
+                    theme::badge(ui, "DEMO", theme::AMBER);
+                }
                 ui.label(
                     RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
                         .monospace()
@@ -344,8 +373,9 @@ impl StudioApp {
     }
 
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
+        let (signal, _, _) = self.system_status();
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "01 / MATERIAL CATALOG");
+            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
                 RichText::new("NEW は選んだ素材フォルダ内に作成します。")
                     .size(11.0)
@@ -451,9 +481,10 @@ impl StudioApp {
 
     fn show_guide_controls(&mut self, ui: &mut Ui) {
         let available_roles = self.available_roles();
+        let (signal, status) = self.guide_status();
         let mut role_to_add = None;
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "02 / COMPOSITION GUIDE");
+            section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(
                 RichText::new("役割を選び、探したい語句・タグを入力します。")
                     .size(11.0)
@@ -548,6 +579,7 @@ impl StudioApp {
     }
 
     fn show_candidate_grid(&mut self, ui: &mut Ui) {
+        let (signal, status) = self.candidates_status();
         let slot_tabs: Vec<_> = self
             .plan
             .as_ref()
@@ -565,7 +597,7 @@ impl StudioApp {
             .and_then(|plan| plan.slots.get(active_index));
         let Some(slot) = active_slot else {
             theme::panel().show(ui, |ui| {
-                theme::caption(ui, "03 / CANDIDATES");
+                section_header(ui, "03 / CANDIDATES", signal, status);
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("候補はここに表示されます").color(theme::MUTED));
                 });
@@ -577,7 +609,7 @@ impl StudioApp {
         let selected = self.selections.get(&slot_id).cloned();
         let mut next_active_index = active_index;
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "03 / CANDIDATES");
+            section_header(ui, "03 / CANDIDATES", signal, status);
             ui.horizontal_wrapped(|ui| {
                 for (index, label) in slot_tabs.iter().enumerate() {
                     if ui.selectable_label(index == active_index, label).clicked() {
@@ -772,6 +804,16 @@ fn manifest_save_directory() -> PathBuf {
         .map(|profile| profile.join("Downloads"))
         .filter(|directory| directory.is_dir())
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn section_header(ui: &mut Ui, title: &str, signal: theme::Signal, detail: &str) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(38.0);
+        theme::caption(ui, title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            theme::traffic_light(ui, signal).on_hover_text(detail);
+        });
+    });
 }
 
 fn demo_guide_inputs() -> Vec<GuideInput> {
