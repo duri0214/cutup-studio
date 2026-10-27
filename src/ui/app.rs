@@ -313,11 +313,14 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "01 / MATERIAL CATALOG");
             ui.label(
-                RichText::new(
-                    "NEW CATALOG で素材フォルダを登録し、区間・タグを編集します。OPEN は保存済みカタログを開きます。",
-                )
-                .size(11.0)
-                .color(theme::MUTED),
+                RichText::new("NEW は素材フォルダを登録します。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new("OPEN は保存済みカタログを開きます。")
+                    .size(11.0)
+                    .color(theme::MUTED),
             );
             ui.add_space(4.0);
             if let Some(path) = &self.catalog_path {
@@ -335,7 +338,7 @@ impl StudioApp {
                 ui.horizontal(|ui| {
                     if theme::action_button(
                         ui,
-                        theme::ActionIcon::Open,
+                        theme::ActionIcon::New,
                         "NEW",
                         false,
                         Vec2::new(106.0, 32.0),
@@ -359,10 +362,13 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
-                    if ui.button("素材・区間・タグを編集").clicked() { editor.open = true; }
+                    if ui.button("素材・区間・タグを編集").clicked() {
+                        editor.open = true;
+                    }
                     if ui.button("RESCAN — フォルダを再走査").clicked()
-                        && let Some(path) = self.catalog_path.clone() {
-                        self.start_catalog_task(path,None,ui.ctx());
+                        && let Some(path) = self.catalog_path.clone()
+                    {
+                        self.start_catalog_task(path, None, ui.ctx());
                     }
                 }
                 if self.catalog_path.is_some()

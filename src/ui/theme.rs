@@ -16,6 +16,7 @@ pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
 
 #[derive(Clone, Copy)]
 pub enum ActionIcon {
+    New,
     Open,
     Generate,
     Save,
@@ -197,6 +198,9 @@ fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color:
 
 fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
     match icon {
+        ActionIcon::New => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/folder-plus.svg"
+        )),
         ActionIcon::Open => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/folder-open.svg"
         )),
