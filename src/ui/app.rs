@@ -458,23 +458,32 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     let rescan = if total == 0 {
-                        ui.label(
-                            "素材ファイル: 0 件 — 素材をフォルダへ入れてから再走査してください。",
-                        );
-                        theme::action_button(
-                            ui,
-                            theme::ActionIcon::Reset,
-                            "RESCAN — フォルダを再走査",
-                            true,
-                            Vec2::new(250.0, 32.0),
-                        )
-                        .clicked()
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                "素材ファイル: 0 件 — 素材をフォルダへ入れてから再走査してください。",
+                            );
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Reset,
+                                "RESCAN — フォルダを再走査",
+                            )
+                            .clicked()
+                        })
+                        .inner
                     } else {
                         ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
-                        if ui.button("素材・区間・タグを編集").clicked() {
-                            editor.open = true;
-                        }
-                        ui.button("RESCAN — フォルダを再走査").clicked()
+                        ui.horizontal(|ui| {
+                            if ui.button("素材・区間・タグを編集").clicked() {
+                                editor.open = true;
+                            }
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Reset,
+                                "RESCAN — フォルダを再走査",
+                            )
+                            .clicked()
+                        })
+                        .inner
                     };
                     if rescan && let Some(path) = self.catalog_path.clone() {
                         self.start_catalog_task(path, None, ui.ctx());

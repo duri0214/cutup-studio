@@ -43,7 +43,7 @@ pub struct SqliteCatalog {
 impl SqliteCatalog {
     /// Existing files are never overwritten, including unrelated SQLite databases.
     pub fn create(path: &Path, root: &Path) -> Result<Self, CatalogError> {
-        let root = root.canonicalize()?;
+        let root = normalize_path(root.canonicalize()?);
         if !root.is_dir() {
             return Err(CatalogError::InvalidPath);
         }
@@ -79,7 +79,7 @@ impl SqliteCatalog {
             })?;
         Ok(Self {
             connection,
-            root: root.into(),
+            root: normalize_path(root.into()),
         })
     }
 
@@ -367,6 +367,20 @@ impl SqliteCatalog {
         }
         Ok(history)
     }
+}
+
+fn normalize_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(unc_path) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{unc_path}"));
+        }
+        if let Some(path) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(path);
+        }
+    }
+    path
 }
 
 fn configure(connection: &Connection) -> Result<(), CatalogError> {
