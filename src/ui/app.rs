@@ -398,70 +398,85 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
-                RichText::new("NEW は素材フォルダを選び、その中に material-catalog.sqlite を作成します。")
-                    .size(11.0)
-                    .color(theme::MUTED),
-            );
-            ui.label(
-                RichText::new("OPEN は既存の material-catalog.sqlite ファイルを選びます。")
+                RichText::new("最初に、始め方を一つ選びます。")
                     .size(11.0)
                     .color(theme::MUTED),
             );
             ui.add_space(4.0);
-            if let Some(path) = &self.catalog_path {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(path.display().to_string())
-                            .size(11.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
-                );
-                ui.add_space(4.0);
-            }
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
                 ui.horizontal(|ui| {
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::New,
-                        "NEW",
-                        false,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.create_catalog(ui.ctx());
-                    }
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::Open,
-                        "OPEN",
-                        false,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.open_catalog(ui.ctx());
-                    }
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::Reset,
-                        "DEMO",
-                        self.is_demo_catalog(),
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.use_demo_catalog();
-                    }
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::New,
+                            "NEW",
+                            false,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.create_catalog(ui.ctx());
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("素材フォルダを選ぶ")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Open,
+                            "OPEN",
+                            false,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.open_catalog(ui.ctx());
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("前のカタログを選ぶ")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Reset,
+                            "DEMO",
+                            self.is_demo_catalog(),
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.use_demo_catalog();
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("サンプルで試す")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
                 });
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     let rescan = if total == 0 {
                         ui.horizontal(|ui| {
-                            ui.label(
-                                "素材ファイル: 0 件 — 素材をフォルダへ入れてから再走査してください。",
-                            );
+                            ui.label("次: 素材ファイルをフォルダに入れてから、更新を押します。");
                             theme::icon_button(
                                 ui,
                                 theme::ActionIcon::Reset,
@@ -473,7 +488,7 @@ impl StudioApp {
                     } else {
                         ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
                         ui.horizontal(|ui| {
-                            if ui.button("素材・区間・タグを編集").clicked() {
+                            if ui.button("次: 区間を登録").clicked() {
                                 editor.open = true;
                             }
                             theme::icon_button(
@@ -515,7 +530,7 @@ impl StudioApp {
                 });
             } else {
                 ui.label(
-                    RichText::new("カタログは選択されていません。")
+                    RichText::new("次: NEW / OPEN / DEMO のどれかを選びます。")
                         .size(10.0)
                         .color(theme::MUTED),
                 );
