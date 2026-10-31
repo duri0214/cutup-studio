@@ -370,7 +370,7 @@ impl StudioApp {
             });
         });
         ui.label(
-            RichText::new("ガイドを読む。素材を選ぶ。構成を残す。")
+            RichText::new("素材フォルダから、構成の指示書を作る。")
                 .size(12.0)
                 .color(theme::MUTED),
         );
@@ -726,7 +726,7 @@ impl StudioApp {
             });
             ui.label(
                 RichText::new(
-                    "確定する順序。SAVE MANIFEST で composition-manifest.json を素材フォルダへ保存します。",
+                    "選んだ素材の順番と時間を、composition-manifest.json として保存します。素材そのものは含みません。",
                 )
                     .size(11.0)
                     .color(theme::MUTED),
