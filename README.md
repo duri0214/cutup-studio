@@ -30,13 +30,9 @@ cargo run
 
 フォルダ登録だけでは区間やタグは生成されません。AI 自動解析は後続対応です。拡張子、データ契約、解析結果の保存 API、再走査と検索の詳細は [ローカル素材カタログ](docs/catalog.md) を参照してください。
 
-`demo/materials/` には、走査用の小さな MP4 を10本同梱しています。DEMO はこれらを素材として走査し、初回だけ `demo/material-catalog.sqlite` を作成します。
+`demo/` はDEMOで使う素材ルートです。構造、同梱素材の出典・利用条件は [demo/README.md](demo/README.md) を参照してください。
 
-### DEMO素材の出典・利用条件
-
-- `01`〜`08`: [ConvertICO MP4 samples](https://convertico.com/samples/mp4/) のテスト・デモ用素材
-- `09-big-buck-bunny.mp4`: Big Buck Bunny の10秒テスト素材（[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)）
-- `10-flower.mp4`: MDN flower video（[CC0](https://creativecommons.org/publicdomain/zero/1.0/)）
+旧JSONカタログ形式の互換確認用サンプルは [examples/catalog.json](examples/catalog.json) にあります。DEMOでは使いません。
 
 ガイドは一行につき `役割: 探したい語句 タグ` と書きます。
 
