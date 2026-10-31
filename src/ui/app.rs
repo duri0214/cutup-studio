@@ -12,7 +12,7 @@ use crate::{
         service::{create_plan, manifest_from_plan},
         valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
     },
-    infra::catalog_file::{load_catalog, save_manifest},
+    infra::catalog_file::save_manifest,
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
@@ -63,38 +63,13 @@ impl StudioApp {
 
     fn open_catalog(&mut self, context: &egui::Context) {
         let Some(path) = rfd::FileDialog::new()
-            .set_title("保存済みカタログファイルを選択（SQLite または JSON）")
+            .set_title("保存済みSQLiteカタログを選択")
             .add_filter("SQLite カタログ", &["sqlite", "db", "sqlite3"])
-            .add_filter("既存の catalog JSON", &["json"])
             .pick_file()
         else {
             return;
         };
-        if !path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
-        {
-            self.start_catalog_task(path, None, context);
-            return;
-        }
-        match load_catalog(&path) {
-            Ok(catalog) => {
-                self.editor = None;
-                self.catalog_path = Some(path);
-                self.catalog = Some(catalog);
-                self.demo_mode = false;
-                self.normalize_guide_roles();
-                self.plan = None;
-                self.selections.clear();
-                self.active_slot = None;
-                self.dragged_guide_index = None;
-                self.status = "CATALOG READY — ガイドから候補を生成できます。".into();
-            }
-            Err(error) => {
-                self.clear_active_catalog();
-                self.status = format!("CATALOG ERROR — {error}");
-            }
-        }
+        self.start_catalog_task(path, None, context);
     }
 
     fn clear_active_catalog(&mut self) {

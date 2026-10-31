@@ -32,8 +32,6 @@ cargo run
 
 `demo/` はDEMOで使う素材ルートです。構造、同梱素材の出典・利用条件は [demo/README.md](demo/README.md) を参照してください。
 
-旧JSONカタログ形式の互換確認用サンプルは [examples/catalog.json](examples/catalog.json) にあります。DEMOでは使いません。
-
 ガイドは一行につき `役割: 探したい語句 タグ` と書きます。
 
 ```text
