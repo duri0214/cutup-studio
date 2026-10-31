@@ -26,6 +26,8 @@ pub enum CatalogError {
     UnsupportedSchema,
     #[error("素材ルート外への参照は登録できません")]
     OutsideRoot,
+    #[error("基準フォルダに materials フォルダがありません: {0}")]
+    MissingMaterialsDirectory(String),
     #[error("素材パスは UTF-8 で表せる実在のフォルダを指定してください")]
     InvalidPath,
     #[error("走査中に素材が変更されました。再走査してください")]
@@ -45,6 +47,7 @@ impl SqliteCatalog {
         if !root.is_dir() {
             return Err(CatalogError::InvalidPath);
         }
+        materials_directory(&root)?;
         let root_text = root.to_str().ok_or(CatalogError::InvalidPath)?;
         let reservation = fs::OpenOptions::new()
             .write(true)
@@ -75,10 +78,9 @@ impl SqliteCatalog {
             connection.query_row("SELECT material_root FROM catalog WHERE id=1", [], |row| {
                 row.get(0)
             })?;
-        Ok(Self {
-            connection,
-            root: normalize_path(root.into()),
-        })
+        let root = normalize_path(root.into());
+        materials_directory(&root)?;
+        Ok(Self { connection, root })
     }
 
     pub fn root(&self) -> &Path {
@@ -86,7 +88,10 @@ impl SqliteCatalog {
     }
 
     pub fn rescan(&mut self) -> Result<ScanReport, CatalogError> {
-        let files = material_scan::scan(&self.root)?;
+        let mut files = material_scan::scan(&materials_directory(&self.root)?)?;
+        for file in &mut files {
+            file.path = format!("materials/{}", file.path);
+        }
         let old: BTreeMap<_, _> = self
             .materials()?
             .into_iter()
@@ -251,6 +256,17 @@ fn configure(connection: &Connection) -> Result<(), CatalogError> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.busy_timeout(Duration::from_secs(5))?;
     Ok(())
+}
+
+fn materials_directory(root: &Path) -> Result<PathBuf, CatalogError> {
+    let materials = root.join("materials");
+    if materials.is_dir() {
+        Ok(materials)
+    } else {
+        Err(CatalogError::MissingMaterialsDirectory(
+            materials.display().to_string(),
+        ))
+    }
 }
 
 fn available_fingerprint(

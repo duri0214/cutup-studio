@@ -5,14 +5,14 @@
 ## 入力と出力
 
 ```text
-入力: 素材フォルダ + 素材に登録した情報 + GUIDE
+入力: 基準フォルダ（materials/） + 素材に登録した情報 + GUIDE
   ↓
 カタログ: material-catalog.sqlite
   ↓
 出力: composition-manifest.json
 ```
 
-- 入力の素材フォルダには、MP4などの動画・音声を入れます。
+- 基準フォルダの `materials/` に、MP4やWAVなどの素材を入れます。`materials/` は空でも構いません。
 - カタログは、素材と検索語句・タグ・役割を次回も使えるように保存します。将来はローカルLLMが素材の言葉を読み取り、この情報を自動で登録します。
 - `composition-manifest.json` は、選んだ素材の順番とパスを記録する構成の指示書です。動画や音声は含みません。
 
@@ -27,12 +27,12 @@ cargo run
 ## 使い方
 
 1. 最初に選びます。
-   - `NEW`: 動画・音声が入った素材フォルダを選ぶ
-   - `OPEN`: 前回作った `material-catalog.sqlite` を選ぶ
+   - `NEW`: `materials/` がある基準フォルダを選ぶ。そこに固定名の `material-catalog.sqlite` を作る
+   - `OPEN`: 前回使った基準フォルダを選ぶ。固定名の `material-catalog.sqlite` を開く
    - `DEMO`: 同梱素材で試す
 2. 素材を走査したら、仮組みとして `素材の情報を登録` で素材に入っている言葉、タグ、役割を保存します。将来はローカルLLMがこの工程を自動化します。素材ファイル1本が、そのまま候補の単位です。
 3. GUIDEに `役割: 探したい語句` を入力して候補を生成します。
-4. 候補を順番に選び、`SAVE MANIFEST` で構成の指示書 `composition-manifest.json` を保存します。保存ダイアログは素材フォルダから開きます。
+4. 候補を順番に選び、`SAVE MANIFEST` で構成の指示書 `composition-manifest.json` を保存します。保存ダイアログは基準フォルダから開きます。
 
 例:
 
@@ -43,7 +43,7 @@ cargo run
 
 ## 素材カタログ
 
-素材カタログは、素材フォルダごとの `material-catalog.sqlite` ファイルです。動画や音声ではなく、次の情報を覚えます。
+素材カタログは、基準フォルダごとの固定名 `material-catalog.sqlite` ファイルです。名前は変更しません。動画や音声ではなく、次の情報を覚えます。
 
 | 種類 | 保存するもの |
 | --- | --- |
@@ -69,7 +69,7 @@ cargo run
 
 ## DEMO
 
-`DEMO` は `demo/` を素材フォルダとして使います。日本語の合成音声で作った完成済みWAV素材10本と、その検索語句・役割を初回から使えます。素材一覧は [demo/README.md](demo/README.md) を参照してください。
+`DEMO` は `demo/` を基準フォルダとして使います。日本語の合成音声で作った完成済みWAV素材10本を使えます。素材一覧は [demo/README.md](demo/README.md) を参照してください。
 
 ## 開発
 

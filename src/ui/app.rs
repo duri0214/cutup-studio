@@ -55,21 +55,32 @@ impl StudioApp {
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
-            status:
-                "NO CATALOG — NEW で素材フォルダを登録するか、OPEN で既存カタログを開いてください。"
-                    .into(),
+            status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
 
     fn open_catalog(&mut self, context: &egui::Context) {
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("保存済みSQLiteカタログを選択")
-            .add_filter("SQLite カタログ", &["sqlite", "db", "sqlite3"])
-            .pick_file()
+        let Some(root) = rfd::FileDialog::new()
+            .set_title("基準フォルダを選択")
+            .pick_folder()
         else {
             return;
         };
-        self.start_catalog_task(path, None, context);
+        let path = root.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => self.start_catalog_task(path, None, context),
+            Ok(false) => {
+                self.clear_active_catalog();
+                self.status = format!(
+                    "CATALOG NOT FOUND — {} に material-catalog.sqlite がありません。NEW で作成してください。",
+                    root.display()
+                );
+            }
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — 基準フォルダを確認できません: {error}");
+            }
+        }
     }
 
     fn clear_active_catalog(&mut self) {
@@ -104,7 +115,7 @@ impl StudioApp {
 
     fn create_catalog(&mut self, context: &egui::Context) {
         let Some(root) = rfd::FileDialog::new()
-            .set_title("素材フォルダを選択（既存カタログは OPEN）")
+            .set_title("基準フォルダを選択（materials フォルダが必要）")
             .pick_folder()
         else {
             return;
@@ -114,7 +125,7 @@ impl StudioApp {
             Ok(true) => {
                 self.clear_active_catalog();
                 self.status = format!(
-                    "CATALOG EXISTS — {} はすでにあります。OPEN で開いてください。",
+                    "CATALOG EXISTS — {} はすでにあります。OPEN で基準フォルダを開いてください。",
                     path.display()
                 );
             }
@@ -218,7 +229,7 @@ impl StudioApp {
     fn build_plan(&mut self) {
         let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
-            self.status = "カタログを開くか、素材フォルダを再走査してください。".into();
+            self.status = "基準フォルダを開くか、materials フォルダを再走査してください。".into();
             return;
         };
         let plan = create_plan(catalog, &guide_text);
@@ -368,7 +379,7 @@ impl StudioApp {
             });
         });
         ui.label(
-            RichText::new("素材フォルダから、構成の指示書を作る。")
+            RichText::new("基準フォルダ内の素材から、構成の指示書を作る。")
                 .size(12.0)
                 .color(theme::MUTED),
         );
@@ -379,9 +390,11 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
-                RichText::new("最初に、始め方を一つ選びます。")
-                    .size(11.0)
-                    .color(theme::MUTED),
+                RichText::new(
+                    "基準フォルダには materials/ と material-catalog.sqlite を置きます。",
+                )
+                .size(11.0)
+                .color(theme::MUTED),
             );
             ui.add_space(4.0);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
@@ -401,7 +414,7 @@ impl StudioApp {
                         ui.add_sized(
                             Vec2::new(106.0, 22.0),
                             egui::Label::new(
-                                RichText::new("素材フォルダを選ぶ")
+                                RichText::new("基準フォルダを選ぶ")
                                     .size(10.0)
                                     .color(theme::MUTED),
                             )
@@ -423,7 +436,7 @@ impl StudioApp {
                         ui.add_sized(
                             Vec2::new(106.0, 22.0),
                             egui::Label::new(
-                                RichText::new("前のカタログを選ぶ")
+                                RichText::new("前の基準フォルダを選ぶ")
                                     .size(10.0)
                                     .color(theme::MUTED),
                             )
@@ -499,7 +512,7 @@ impl StudioApp {
                     if self.catalog_path.is_some() {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(format!("素材フォルダ: {}", catalog.material_root))
+                                RichText::new(format!("基準フォルダ: {}", catalog.material_root))
                                     .size(10.0)
                                     .color(theme::MUTED),
                             )

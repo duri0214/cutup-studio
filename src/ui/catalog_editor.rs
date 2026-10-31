@@ -261,7 +261,9 @@ mod tests {
     #[test]
     fn editor_saved_material_metadata_survives_reopening_and_produces_candidates() {
         let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("sample.wav"), b"local media fixture").unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("sample.wav"), b"local media fixture").unwrap();
         let path = temp.path().join("catalog.sqlite");
         let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
         store.rescan().unwrap();
