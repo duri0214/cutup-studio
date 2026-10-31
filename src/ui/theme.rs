@@ -16,11 +16,19 @@ pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
 
 #[derive(Clone, Copy)]
 pub enum ActionIcon {
+    New,
     Open,
     Generate,
     Save,
     Reset,
     Delete,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    Error,
+    Attention,
+    Ready,
 }
 
 pub fn install(context: &Context) {
@@ -109,6 +117,32 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         });
 }
 
+pub fn traffic_light(ui: &mut Ui, active: Signal) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(8, 11, 15));
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0_f32, BORDER),
+        StrokeKind::Inside,
+    );
+    for (signal, color, offset) in [
+        (Signal::Error, RED, 8.0),
+        (Signal::Attention, AMBER, 19.0),
+        (Signal::Ready, ACCENT, 30.0),
+    ] {
+        let color = if signal == active {
+            color
+        } else {
+            color.gamma_multiply(0.18)
+        };
+        ui.painter()
+            .circle_filled(Pos2::new(rect.center().x, rect.top() + offset), 3.5, color);
+    }
+    response
+}
+
 pub fn role_badge(ui: &mut Ui, text: &str, color: Color32) {
     ui.allocate_ui_with_layout(
         Vec2::new(48.0, 24.0),
@@ -185,7 +219,7 @@ pub fn action_button(
     if primary && enabled {
         button = button.fill(ACCENT).stroke(Stroke::new(1.0_f32, ACCENT));
     }
-    ui.horizontal(|ui| ui.add_sized(size, button)).inner
+    ui.add_sized(size, button)
 }
 
 fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {
@@ -197,8 +231,11 @@ fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color:
 
 fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
     match icon {
+        ActionIcon::New => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/folder-plus.svg"
+        )),
         ActionIcon::Open => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/folder-open.svg"
+            "../../assets/icons/lucide/file-open.svg"
         )),
         ActionIcon::Generate => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/wand-sparkles.svg"

@@ -1,6 +1,6 @@
 use super::valueobject::{
-    Candidate, Catalog, DomainError, GuideSlot, Manifest, ManifestEntry, Plan, SCHEMA_VERSION,
-    Segment, SlotPlan,
+    Candidate, Catalog, CatalogMaterial, DomainError, GuideSlot, Manifest, ManifestEntry, Plan,
+    SCHEMA_VERSION, SlotPlan,
 };
 use std::collections::BTreeMap;
 
@@ -72,15 +72,15 @@ pub fn create_plan(catalog: &Catalog, guide_text: &str) -> Plan {
             .into_iter()
             .map(|slot| {
                 let mut candidates: Vec<_> = catalog
-                    .segments
+                    .materials
                     .iter()
-                    .filter_map(|segment| score_candidate(&slot, segment))
+                    .filter_map(|material| score_candidate(&slot, material))
                     .collect();
                 candidates.sort_by(|left, right| {
                     right
                         .score
                         .cmp(&left.score)
-                        .then_with(|| left.segment_id.cmp(&right.segment_id))
+                        .then_with(|| left.material_id.cmp(&right.material_id))
                 });
                 SlotPlan { slot, candidates }
             })
@@ -88,18 +88,18 @@ pub fn create_plan(catalog: &Catalog, guide_text: &str) -> Plan {
     }
 }
 
-fn score_candidate(slot: &GuideSlot, segment: &Segment) -> Option<Candidate> {
+fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candidate> {
     let mut score = 0;
     let mut reasons = Vec::new();
     let searchable = format!(
         "{} {} {} {}",
-        segment.transcript,
-        segment.keywords.join(" "),
-        segment.tags.join(" "),
-        segment.roles.join(" ")
+        material.keywords.join(" "),
+        material.tags.join(" "),
+        material.roles.join(" "),
+        material.note
     )
     .to_lowercase();
-    if segment
+    if material
         .roles
         .iter()
         .any(|role| role.eq_ignore_ascii_case(&slot.role))
@@ -116,19 +116,16 @@ fn score_candidate(slot: &GuideSlot, segment: &Segment) -> Option<Candidate> {
     {
         if searchable.contains(&term.to_lowercase()) {
             score += 2;
-            reasons.push(format!("「{}」が文字起こし・語句・タグ・役割に一致", term));
+            reasons.push(format!("「{}」が検索語句・タグ・役割・メモに一致", term));
         }
     }
     (score > 0).then(|| Candidate {
-        segment_id: segment.id.clone(),
+        material_id: material.id.clone(),
         score,
         reasons,
-        source_path: segment.source_path.clone(),
-        start_ms: segment.start_ms,
-        end_ms: segment.end_ms,
-        transcript: segment.transcript.clone(),
-        tags: segment.tags.clone(),
-        roles: segment.roles.clone(),
+        source_path: material.source_path.clone(),
+        tags: material.tags.clone(),
+        roles: material.roles.clone(),
     })
 }
 
@@ -146,7 +143,7 @@ pub fn manifest_from_plan(
             let candidate = slot_plan
                 .candidates
                 .iter()
-                .find(|candidate| candidate.segment_id == *selection)
+                .find(|candidate| candidate.material_id == *selection)
                 .ok_or_else(|| DomainError::CandidateNotFound {
                     slot: slot_plan.slot.id.clone(),
                     candidate: selection.clone(),
@@ -156,10 +153,8 @@ pub fn manifest_from_plan(
                 slot_id: slot_plan.slot.id.clone(),
                 role: slot_plan.slot.role.clone(),
                 query: slot_plan.slot.query.clone(),
-                segment_id: candidate.segment_id.clone(),
+                material_id: candidate.material_id.clone(),
                 source_path: candidate.source_path.clone(),
-                start_ms: candidate.start_ms,
-                end_ms: candidate.end_ms,
                 selection_reason: candidate.reasons.clone(),
             })
         })
@@ -175,29 +170,23 @@ pub fn manifest_from_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::valueobject::Segment;
+
     fn catalog() -> Catalog {
         Catalog {
             schema_version: 1,
             material_root: "C:/media/cutup-samples".into(),
-            segments: vec![
-                Segment {
-                    id: "tekkaman-intro".into(),
+            materials: vec![
+                CatalogMaterial {
+                    id: "tekkaman".into(),
                     source_path: "anime/01.mp4".into(),
-                    start_ms: 1200,
-                    end_ms: 4500,
-                    transcript: "テッカマン、参上！".into(),
                     keywords: vec!["テッカマン".into()],
                     tags: vec!["登場".into()],
                     roles: vec!["導入".into()],
                     note: String::new(),
                 },
-                Segment {
+                CatalogMaterial {
                     id: "surprised-reaction".into(),
                     source_path: "anime/02.mp4".into(),
-                    start_ms: 8400,
-                    end_ms: 10400,
-                    transcript: "えっ!?".into(),
                     keywords: vec!["驚き".into()],
                     tags: vec!["反応".into()],
                     roles: vec!["つなぎ".into()],
@@ -206,6 +195,7 @@ mod tests {
             ],
         }
     }
+
     #[test]
     fn natural_japanese_guide_becomes_ordered_slots() {
         let slots = parse_guide("テッカマンを導入に置き、驚きの反応でつなぐ");
@@ -213,15 +203,16 @@ mod tests {
         assert_eq!(slots[0].role, "導入");
         assert_eq!(slots[1].query, "驚き 反応");
     }
+
     #[test]
     fn selected_candidates_make_traceable_manifest() {
         let plan = create_plan(&catalog(), "導入: テッカマン\nつなぎ: 驚き 反応");
         let selections = BTreeMap::from([
-            ("slot-1".to_owned(), "tekkaman-intro".to_owned()),
+            ("slot-1".to_owned(), "tekkaman".to_owned()),
             ("slot-2".to_owned(), "surprised-reaction".to_owned()),
         ]);
         let manifest = manifest_from_plan(&plan, &selections).unwrap();
         assert_eq!(manifest.entries[0].source_path, "anime/01.mp4");
-        assert_eq!(manifest.entries[1].start_ms, 8400);
+        assert_eq!(manifest.entries[1].material_id, "surprised-reaction");
     }
 }

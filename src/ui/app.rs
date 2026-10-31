@@ -1,19 +1,25 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
+    sync::mpsc::{self, Receiver, TryRecvError},
 };
 
 use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 
 use crate::{
+    domain::valueobject::catalog::ScanReport,
     domain::{
         service::{create_plan, manifest_from_plan},
-        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION, Segment},
+        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
     },
-    infra::catalog_file::{load_catalog, save_manifest},
+    infra::catalog_file::save_manifest,
+    infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
+use super::catalog_editor::CatalogEditor;
 use super::theme;
+
+type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
 
 #[derive(Clone)]
 struct GuideInput {
@@ -24,6 +30,9 @@ struct GuideInput {
 pub struct StudioApp {
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
+    demo_mode: bool,
+    editor: Option<CatalogEditor>,
+    catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
     selections: BTreeMap<String, String>,
@@ -36,55 +45,191 @@ impl StudioApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
         theme::install(&creation_context.egui_ctx);
         Self {
-            catalog: Some(demo_catalog()),
+            catalog: None,
             catalog_path: None,
-            guide_inputs: demo_guide_inputs(),
+            demo_mode: false,
+            editor: None,
+            catalog_task: None,
+            guide_inputs: Vec::new(),
             plan: None,
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
-            status: "READY — GUIDE を生成して候補を確認できます。".into(),
+            status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
 
-    fn open_catalog(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("catalog JSON を選択")
-            .add_filter("catalog JSON（素材フォルダと素材クリップ）", &["json"])
-            .pick_file()
+    fn open_catalog(&mut self, context: &egui::Context) {
+        let Some(root) = rfd::FileDialog::new()
+            .set_title("基準フォルダを選択")
+            .pick_folder()
         else {
             return;
         };
-        match load_catalog(&path) {
-            Ok(catalog) => {
-                self.catalog_path = Some(path);
-                self.catalog = Some(catalog);
-                self.normalize_guide_roles();
-                self.plan = None;
-                self.selections.clear();
-                self.active_slot = None;
-                self.dragged_guide_index = None;
-                self.status = "CATALOG READY — ガイドから候補を生成できます。".into();
+        let path = root.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => self.start_catalog_task(path, None, context),
+            Ok(false) => {
+                self.clear_active_catalog();
+                self.status = format!(
+                    "CATALOG NOT FOUND — {} に material-catalog.sqlite がありません。NEW で作成してください。",
+                    root.display()
+                );
             }
-            Err(error) => self.status = format!("CATALOG ERROR — {error}"),
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — 基準フォルダを確認できません: {error}");
+            }
         }
     }
 
-    fn use_demo_catalog(&mut self) {
-        self.catalog = Some(demo_catalog());
+    fn clear_active_catalog(&mut self) {
+        self.catalog = None;
         self.catalog_path = None;
-        self.guide_inputs = demo_guide_inputs();
+        self.demo_mode = false;
+        self.editor = None;
         self.plan = None;
         self.selections.clear();
         self.active_slot = None;
         self.dragged_guide_index = None;
-        self.status = "READY — GUIDE を生成して候補を確認できます。".into();
+    }
+
+    fn use_demo_catalog(&mut self, context: &egui::Context) {
+        let root = demo_material_root();
+        let path = root.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => self.start_catalog_task(path, None, context),
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — DEMO のカタログを確認できません: {error}");
+            }
+        }
+        self.demo_mode = true;
+        self.guide_inputs.clear();
+    }
+
+    fn is_demo_catalog(&self) -> bool {
+        self.demo_mode
+    }
+
+    fn create_catalog(&mut self, context: &egui::Context) {
+        let Some(root) = rfd::FileDialog::new()
+            .set_title("基準フォルダを選択（materials フォルダが必要）")
+            .pick_folder()
+        else {
+            return;
+        };
+        let path = root.join("material-catalog.sqlite");
+        match path.try_exists() {
+            Ok(true) => {
+                self.clear_active_catalog();
+                self.status = format!(
+                    "CATALOG EXISTS — {} はすでにあります。OPEN で基準フォルダを開いてください。",
+                    path.display()
+                );
+            }
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
+            Err(error) => {
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
+            }
+        }
+    }
+
+    fn start_catalog_task(
+        &mut self,
+        path: PathBuf,
+        root: Option<PathBuf>,
+        context: &egui::Context,
+    ) {
+        self.clear_active_catalog();
+        let (sender, receiver) = mpsc::channel();
+        let context = context.clone();
+        std::thread::spawn(move || {
+            let result = (|| {
+                let mut store = match root {
+                    Some(root) => SqliteCatalog::create(&path, &root)?,
+                    None => SqliteCatalog::open(&path)?,
+                };
+                let report = store.rescan()?;
+                Ok((store, path, report))
+            })();
+            let _ = sender.send(result);
+            context.request_repaint();
+        });
+        self.catalog_task = Some(receiver);
+        self.status =
+            "SCANNING — 素材を登録しています。ファイル数・サイズにより時間がかかります。".into();
+    }
+
+    fn poll_catalog_task(&mut self) {
+        let Some(task) = &self.catalog_task else {
+            return;
+        };
+        let result = match task.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.catalog_task = None;
+                self.clear_active_catalog();
+                self.status =
+                    "CATALOG ERROR — フォルダ走査が中断されました。再走査してください。".into();
+                return;
+            }
+        };
+        self.catalog_task = None;
+        match result
+            .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
+        {
+            Ok((mut editor, path, report)) => {
+                let (total, _) = editor.counts();
+                editor.open = total > 0;
+                self.editor = Some(editor);
+                self.catalog_path = Some(path);
+                self.reload_catalog();
+                self.status = if total == 0 {
+                    "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて RESCAN してください。".into()
+                } else {
+                    format!(
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録して GUIDE から候補を生成できます。",
+                        report.added, report.changed, report.missing, report.restored
+                    )
+                };
+            }
+            Err(error) => {
+                // A failed rescan must not leave an old plan available for export.
+                self.clear_active_catalog();
+                self.status = format!("CATALOG ERROR — {error}");
+            }
+        }
+    }
+
+    fn reload_catalog(&mut self) {
+        let result = self
+            .editor
+            .as_ref()
+            .map(|editor| editor.store.candidate_catalog());
+        if let Some(result) = result {
+            match result {
+                Ok(catalog) => self.catalog = Some(catalog),
+                Err(error) => {
+                    self.clear_active_catalog();
+                    self.status = format!("CATALOG ERROR — {error}");
+                    return;
+                }
+            }
+        }
+        self.plan = None;
+        self.selections.clear();
+        self.active_slot = None;
+        self.normalize_guide_roles();
     }
 
     fn build_plan(&mut self) {
         let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
-            self.status = "CATALOG JSON を先に読み込んでください。".into();
+            self.status = "基準フォルダを開くか、materials フォルダを再走査してください。".into();
             return;
         };
         let plan = create_plan(catalog, &guide_text);
@@ -98,7 +243,7 @@ impl StudioApp {
             .filter_map(|slot| {
                 slot.candidates
                     .first()
-                    .map(|candidate| (slot.slot.id.clone(), candidate.segment_id.clone()))
+                    .map(|candidate| (slot.slot.id.clone(), candidate.material_id.clone()))
             })
             .collect();
         self.active_slot = Some(0);
@@ -112,8 +257,8 @@ impl StudioApp {
     fn available_roles(&self) -> Vec<String> {
         self.catalog
             .iter()
-            .flat_map(|catalog| catalog.segments.iter())
-            .flat_map(|segment| segment.roles.iter().cloned())
+            .flat_map(|catalog| catalog.materials.iter())
+            .flat_map(|material| material.roles.iter().cloned())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
@@ -142,7 +287,7 @@ impl StudioApp {
         };
         let dialog = rfd::FileDialog::new()
             .set_file_name("composition-manifest.json")
-            .set_directory(manifest_save_directory());
+            .set_directory(&plan.material_root);
         let Some(path) = dialog.save_file() else {
             return;
         };
@@ -155,7 +300,62 @@ impl StudioApp {
         }
     }
 
+    fn system_status(&self) -> (theme::Signal, Color32, &'static str) {
+        if self.status.starts_with("CATALOG ERROR")
+            || self.status.starts_with("CATALOG EXISTS")
+            || self.status.starts_with("MANIFEST ERROR")
+        {
+            (theme::Signal::Error, theme::RED, "ERROR")
+        } else if self.catalog_task.is_some() {
+            (theme::Signal::Attention, theme::AMBER, "SCANNING")
+        } else if self.catalog.is_none() {
+            (theme::Signal::Attention, theme::AMBER, "NO CATALOG")
+        } else if self.is_demo_catalog() {
+            (theme::Signal::Ready, theme::ACCENT, "DEMO")
+        } else {
+            (theme::Signal::Ready, theme::ACCENT, "READY")
+        }
+    }
+
+    fn guide_status(&self) -> (theme::Signal, &'static str) {
+        if self.catalog.is_none() {
+            (
+                theme::Signal::Attention,
+                "01 の素材カタログを開いてください",
+            )
+        } else if self.plan.is_some() {
+            (theme::Signal::Ready, "GUIDE から候補を生成済みです")
+        } else {
+            (
+                theme::Signal::Attention,
+                "GUIDE を入力して候補を生成してください",
+            )
+        }
+    }
+
+    fn candidates_status(&self) -> (theme::Signal, &'static str) {
+        if self.catalog.is_none() {
+            (
+                theme::Signal::Attention,
+                "01 の素材カタログを開いてください",
+            )
+        } else if let Some(plan) = &self.plan {
+            let active_index = self.active_slot.unwrap_or_default();
+            match plan.slots.get(active_index) {
+                Some(slot) if slot.candidates.is_empty() => (
+                    theme::Signal::Error,
+                    "候補がありません。GUIDE の語句・タグ・役割を確認してください",
+                ),
+                Some(_) => (theme::Signal::Ready, "候補を選択できます"),
+                None => (theme::Signal::Attention, "02 で GUIDE を生成してください"),
+            }
+        } else {
+            (theme::Signal::Attention, "02 で GUIDE を生成してください")
+        }
+    }
+
     fn show_header(&self, ui: &mut Ui) {
+        let (signal, _, _) = self.system_status();
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             ui.label(
@@ -167,8 +367,8 @@ impl StudioApp {
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::badge(ui, "MANIFEST", theme::ACCENT);
-                if self.catalog_path.is_none() {
-                    theme::badge(ui, "DEMO", theme::AMBER);
+                if self.is_demo_catalog() && signal != theme::Signal::Error {
+                    theme::badge(ui, "DEMO", theme::ACCENT);
                 }
                 ui.label(
                     RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
@@ -179,63 +379,132 @@ impl StudioApp {
             });
         });
         ui.label(
-            RichText::new("ガイドを読む。素材を選ぶ。構成を残す。")
+            RichText::new("基準フォルダ内の素材から、構成の指示書を作る。")
                 .size(12.0)
                 .color(theme::MUTED),
         );
     }
 
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
+        let (signal, _, _) = self.system_status();
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "01 / MATERIAL CATALOG");
+            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
                 RichText::new(
-                    "実素材を使う場合は、素材フォルダと素材クリップを定義した catalog JSON を開きます。",
+                    "基準フォルダには materials/ と material-catalog.sqlite を置きます。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
             );
             ui.add_space(4.0);
-            if let Some(path) = &self.catalog_path {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(path.display().to_string())
-                            .size(11.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
-                );
-                ui.add_space(4.0);
-            }
-            if theme::action_button(
-                ui,
-                theme::ActionIcon::Open,
-                "OPEN",
-                false,
-                Vec2::new(106.0, 32.0),
-            )
-            .clicked()
-            {
-                self.open_catalog();
-            }
-            if self.catalog_path.is_some()
-                && theme::action_button(
-                    ui,
-                    theme::ActionIcon::Reset,
-                    "RESET TO DEMO CATALOG",
-                    false,
-                    Vec2::new(250.0, 32.0),
-                )
-                .clicked()
-            {
-                self.use_demo_catalog();
-            }
+            ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::New,
+                            "NEW",
+                            false,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.create_catalog(ui.ctx());
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("基準フォルダを選ぶ")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Open,
+                            "OPEN",
+                            false,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.open_catalog(ui.ctx());
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("前の基準フォルダを選ぶ")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.vertical(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Reset,
+                            "DEMO",
+                            self.is_demo_catalog(),
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.use_demo_catalog(ui.ctx());
+                        }
+                        ui.add_sized(
+                            Vec2::new(106.0, 22.0),
+                            egui::Label::new(
+                                RichText::new("サンプルで試す")
+                                    .size(10.0)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap(),
+                        );
+                    });
+                });
+                if let Some(editor) = &mut self.editor {
+                    let (total, missing) = editor.counts();
+                    let rescan = if total == 0 {
+                        ui.horizontal(|ui| {
+                            ui.label("次: 素材ファイルをフォルダに入れてから、更新を押します。");
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Reset,
+                                "RESCAN — フォルダを再走査",
+                            )
+                            .clicked()
+                        })
+                        .inner
+                    } else {
+                        ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                        ui.horizontal(|ui| {
+                            if ui.button("次: 素材の情報を登録").clicked() {
+                                editor.open = true;
+                            }
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Reset,
+                                "RESCAN — フォルダを再走査",
+                            )
+                            .clicked()
+                        })
+                        .inner
+                    };
+                    if rescan && let Some(path) = self.catalog_path.clone() {
+                        self.start_catalog_task(path, None, ui.ctx());
+                    }
+                }
+            });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format!(
-                            "登録済みの素材クリップ: {} 件",
-                            catalog.segments.len()
+                            "情報を登録済みの素材: {} 件",
+                            catalog.materials.len()
                         ))
                         .size(10.0)
                         .color(theme::MUTED),
@@ -243,7 +512,7 @@ impl StudioApp {
                     if self.catalog_path.is_some() {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(format!("素材フォルダ: {}", catalog.material_root))
+                                RichText::new(format!("基準フォルダ: {}", catalog.material_root))
                                     .size(10.0)
                                     .color(theme::MUTED),
                             )
@@ -251,15 +520,22 @@ impl StudioApp {
                         );
                     }
                 });
+            } else {
+                ui.label(
+                    RichText::new("次: NEW / OPEN / DEMO のどれかを選びます。")
+                        .size(10.0)
+                        .color(theme::MUTED),
+                );
             }
         });
     }
 
     fn show_guide_controls(&mut self, ui: &mut Ui) {
         let available_roles = self.available_roles();
+        let (signal, status) = self.guide_status();
         let mut role_to_add = None;
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "02 / COMPOSITION GUIDE");
+            section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(
                 RichText::new("役割を選び、探したい語句・タグを入力します。")
                     .size(11.0)
@@ -354,6 +630,7 @@ impl StudioApp {
     }
 
     fn show_candidate_grid(&mut self, ui: &mut Ui) {
+        let (signal, status) = self.candidates_status();
         let slot_tabs: Vec<_> = self
             .plan
             .as_ref()
@@ -371,7 +648,7 @@ impl StudioApp {
             .and_then(|plan| plan.slots.get(active_index));
         let Some(slot) = active_slot else {
             theme::panel().show(ui, |ui| {
-                theme::caption(ui, "03 / CANDIDATES");
+                section_header(ui, "03 / CANDIDATES", signal, status);
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("候補はここに表示されます").color(theme::MUTED));
                 });
@@ -383,7 +660,7 @@ impl StudioApp {
         let selected = self.selections.get(&slot_id).cloned();
         let mut next_active_index = active_index;
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "03 / CANDIDATES");
+            section_header(ui, "03 / CANDIDATES", signal, status);
             ui.horizontal_wrapped(|ui| {
                 for (index, label) in slot_tabs.iter().enumerate() {
                     if ui.selectable_label(index == active_index, label).clicked() {
@@ -414,17 +691,17 @@ impl StudioApp {
                         if candidate_card(
                             ui,
                             candidate,
-                            selected.as_deref() == Some(candidate.segment_id.as_str()),
+                            selected.as_deref() == Some(candidate.material_id.as_str()),
                             card_width,
                         ) {
-                            chosen = Some(candidate.segment_id.clone());
+                            chosen = Some(candidate.material_id.clone());
                         }
                     }
                 });
                 ui.add_space(4.0);
             }
-            if let Some(segment_id) = chosen {
-                self.selections.insert(slot_id, segment_id);
+            if let Some(material_id) = chosen {
+                self.selections.insert(slot_id, material_id);
                 self.status = "CANDIDATE SELECTED — STAGE の順序を確認して保存できます。".into();
             }
         });
@@ -446,7 +723,7 @@ impl StudioApp {
                         let candidate = selected_id.and_then(|id| {
                             slot.candidates
                                 .iter()
-                                .find(|candidate| candidate.segment_id == *id)
+                                .find(|candidate| candidate.material_id == *id)
                         });
                         (slot.slot.order, slot.slot.role.clone(), candidate.cloned())
                     })
@@ -458,12 +735,12 @@ impl StudioApp {
                 ui.set_min_height(32.0);
                 theme::caption(ui, "COMPOSITION STAGE");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    theme::badge(ui, &format!("{} CUTS", entries.len()), theme::ACCENT);
+                    theme::badge(ui, &format!("{} MATERIALS", entries.len()), theme::ACCENT);
                 });
             });
             ui.label(
                 RichText::new(
-                    "確定する順序。SAVE MANIFEST で composition-manifest.json を Downloads に出力します。",
+                    "選んだ素材の順番を、composition-manifest.json として保存します。素材そのものは含みません。",
                 )
                     .size(11.0)
                     .color(theme::MUTED),
@@ -479,18 +756,16 @@ impl StudioApp {
                 ui.add_space(24.0);
             }
             for (order, role, candidate) in &entries {
-                let (name, timing, source) = candidate.as_ref().map_or_else(
+                let (name, source) = candidate.as_ref().map_or_else(
                     || {
                         (
                             "UNSELECTED".to_owned(),
-                            "--".to_owned(),
                             "候補なし".to_owned(),
                         )
                     },
                     |candidate| {
                         (
-                            candidate.segment_id.clone(),
-                            format!("{}–{} ms", candidate.start_ms, candidate.end_ms),
+                            candidate.material_id.clone(),
                             candidate.source_path.clone(),
                         )
                     },
@@ -506,7 +781,7 @@ impl StudioApp {
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(name).size(12.0).strong());
                                 ui.label(
-                                    RichText::new(format!("{} / {}", role, timing))
+                                    RichText::new(role)
                                         .size(10.0)
                                         .color(theme::MUTED),
                                 );
@@ -535,9 +810,19 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_catalog_task();
+        let busy = self.catalog_task.is_some();
+        if let Some(editor) = &mut self.editor
+            && editor.show(context, !busy)
+        {
+            self.reload_catalog();
+            self.status =
+                "CATALOG SAVED — 素材の情報を保存しました。候補を再生成してください。".into();
+        }
+        let (_, status_color, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
-                theme::badge(ui, "SYSTEM", theme::AMBER);
+                theme::badge(ui, status_label, status_color);
                 ui.label(RichText::new(&self.status).size(11.0).color(theme::MUTED));
             });
         });
@@ -551,37 +836,26 @@ impl eframe::App for StudioApp {
                         let controls = &mut columns[0];
                         self.show_catalog_controls(controls);
                         controls.add_space(8.0);
-                        self.show_guide_controls(controls);
+                        controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
                         controls.add_space(10.0);
                         self.show_candidate_grid(controls);
 
                         let stage = &mut columns[1];
-                        self.show_stage(stage);
+                        stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                     });
                 });
             });
     }
 }
 
-fn manifest_save_directory() -> PathBuf {
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .map(|profile| profile.join("Downloads"))
-        .filter(|directory| directory.is_dir())
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn demo_guide_inputs() -> Vec<GuideInput> {
-    vec![
-        GuideInput {
-            role: "導入".into(),
-            query: "テッカマン".into(),
-        },
-        GuideInput {
-            role: "つなぎ".into(),
-            query: "驚き 反応".into(),
-        },
-    ]
+fn section_header(ui: &mut Ui, title: &str, signal: theme::Signal, detail: &str) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(38.0);
+        theme::caption(ui, title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            theme::traffic_light(ui, signal).on_hover_text(detail);
+        });
+    });
 }
 
 fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
@@ -593,57 +867,8 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
         .join("\n")
 }
 
-fn demo_catalog() -> Catalog {
-    Catalog {
-        schema_version: SCHEMA_VERSION,
-        material_root: "組み込みデモ（素材ファイルなし）".into(),
-        segments: vec![
-            Segment {
-                id: "demo-tekkaman-intro".into(),
-                source_path: "demo/tekkaman-intro.mp4".into(),
-                start_ms: 1200,
-                end_ms: 4500,
-                transcript: "テッカマンが登場する導入シーン".into(),
-                keywords: vec!["テッカマン".into(), "登場".into()],
-                tags: vec!["導入".into(), "画".into()],
-                roles: vec!["導入".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-tekkaman-closeup".into(),
-                source_path: "demo/tekkaman-closeup.mp4".into(),
-                start_ms: 8000,
-                end_ms: 10500,
-                transcript: "テッカマンのクローズアップ".into(),
-                keywords: vec!["テッカマン".into(), "クローズアップ".into()],
-                tags: vec!["導入".into(), "画".into()],
-                roles: vec!["導入".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-surprised-reaction".into(),
-                source_path: "demo/surprised-reaction.mp4".into(),
-                start_ms: 8400,
-                end_ms: 10400,
-                transcript: "えっ、という驚きの反応".into(),
-                keywords: vec!["驚き".into(), "反応".into()],
-                tags: vec!["反応".into(), "つなぎ".into()],
-                roles: vec!["つなぎ".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-            Segment {
-                id: "demo-quick-reaction".into(),
-                source_path: "demo/quick-reaction.mp4".into(),
-                start_ms: 2000,
-                end_ms: 3600,
-                transcript: "短い驚きのリアクション".into(),
-                keywords: vec!["驚き".into(), "反応".into()],
-                tags: vec!["反応".into(), "つなぎ".into()],
-                roles: vec!["つなぎ".into()],
-                note: "動作確認用の仮想素材".into(),
-            },
-        ],
-    }
+fn demo_material_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
@@ -686,17 +911,8 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
                     }
                 });
                 ui.add(
-                    egui::Label::new(RichText::new(&candidate.segment_id).size(12.0).strong())
+                    egui::Label::new(RichText::new(&candidate.material_id).size(12.0).strong())
                         .truncate(),
-                );
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(format!("{}–{} ms", candidate.start_ms, candidate.end_ms))
-                            .monospace()
-                            .size(10.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
                 );
                 ui.add(
                     egui::Label::new(
@@ -719,7 +935,7 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         .response;
     let response = ui.interact(
         response.rect,
-        ui.id().with((&candidate.segment_id, candidate.start_ms)),
+        ui.id().with(&candidate.material_id),
         Sense::click(),
     );
     if selected || response.hovered() {
@@ -731,20 +947,4 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         );
     }
     response.clicked()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn demo_catalog_generates_candidates_for_the_default_guide() {
-        let catalog = demo_catalog();
-        catalog.validate_metadata().unwrap();
-
-        let plan = create_plan(&catalog, &guide_text_from_inputs(&demo_guide_inputs()));
-
-        assert_eq!(plan.slots.len(), 2);
-        assert!(plan.slots.iter().all(|slot| !slot.candidates.is_empty()));
-    }
 }

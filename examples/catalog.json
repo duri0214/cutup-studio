@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "material_root": "C:/media/cutup-samples",
-  "segments": [
-    { "id": "tekkaman-intro", "source_path": "anime/tekkaman-01.mp4", "start_ms": 1200, "end_ms": 4500, "transcript": "テッカマン、参上！", "keywords": ["テッカマン", "参上"], "tags": ["登場", "決め台詞"], "roles": ["導入"], "note": "勢いのある冒頭用" },
-    { "id": "surprised-reaction", "source_path": "anime/reaction-02.mp4", "start_ms": 8400, "end_ms": 10400, "transcript": "えっ!?", "keywords": ["驚き"], "tags": ["反応", "驚き"], "roles": ["つなぎ"], "note": "導入の直後に置ける短い反応" }
-  ]
-}
