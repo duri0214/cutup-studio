@@ -30,21 +30,13 @@ cargo run
 
 フォルダ登録だけでは区間やタグは生成されません。AI 自動解析は後続対応です。拡張子、データ契約、解析結果の保存 API、再走査と検索の詳細は [ローカル素材カタログ](docs/catalog.md) を参照してください。
 
-`demo/materials/` には、走査用の小さな MP4 を10本同梱しています。`NEW` で親の `demo/` フォルダを選べば実ファイルの走査を試せます。`demo/catalog.json` は同じ素材を参照する既存JSONカタログで、リポジトリ直下から `OPEN` で選べます。出典・利用条件は [demo/SAMPLES.md](demo/SAMPLES.md) を参照してください。以前の catalog JSON も `OPEN` のファイル種別を切り替えて読み込めます。この経路は従来の読み取り専用で、SQLite カタログへのインポートではありません。各区間の形式は次のとおりです。
+`demo/materials/` には、走査用の小さな MP4 を10本同梱しています。DEMO はこれらを素材として走査し、初回だけ `demo/material-catalog.sqlite` を作成します。
 
-```json
-{
-  "id": "segment-id",
-  "source_path": "folder/source.mp4",
-  "start_ms": 1200,
-  "end_ms": 4500,
-  "transcript": "文字起こしまたは台詞",
-  "keywords": ["語句"],
-  "tags": ["画", "音", "反応"],
-  "roles": ["導入"],
-  "note": "制作上のメモ"
-}
-```
+### DEMO素材の出典・利用条件
+
+- `01`〜`08`: [ConvertICO MP4 samples](https://convertico.com/samples/mp4/) のテスト・デモ用素材
+- `09-big-buck-bunny.mp4`: Big Buck Bunny の10秒テスト素材（[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)）
+- `10-flower.mp4`: MDN flower video（[CC0](https://creativecommons.org/publicdomain/zero/1.0/)）
 
 ガイドは一行につき `役割: 探したい語句 タグ` と書きます。
 
@@ -64,7 +56,7 @@ cargo run
 ```text
 src/
 ├─ domain/  # カタログ・候補・manifestの値と検索/構成サービス
-├─ infra/   # SQLite、素材フォルダ走査、既存 catalog JSON と manifest JSON の入出力
+├─ infra/   # SQLite、素材フォルダ走査、manifest JSON の入出力
 └─ ui/      # eframe画面と VJ 風テーマ
 ```
 
