@@ -92,7 +92,6 @@ impl StudioApp {
             Err(error) => {
                 self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — DEMO のカタログを確認できません: {error}");
-                return;
             }
         }
         self.demo_mode = true;
@@ -118,7 +117,6 @@ impl StudioApp {
                     "CATALOG EXISTS — {} はすでにあります。OPEN で開いてください。",
                     path.display()
                 );
-                return;
             }
             Ok(false) => self.start_catalog_task(path, Some(root), context),
             Err(error) => {
@@ -183,7 +181,7 @@ impl StudioApp {
                     "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて RESCAN してください。".into()
                 } else {
                     format!(
-                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。区間を編集して GUIDE から候補を生成できます。",
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録して GUIDE から候補を生成できます。",
                         report.added, report.changed, report.missing, report.restored
                     )
                 };
@@ -234,7 +232,7 @@ impl StudioApp {
             .filter_map(|slot| {
                 slot.candidates
                     .first()
-                    .map(|candidate| (slot.slot.id.clone(), candidate.segment_id.clone()))
+                    .map(|candidate| (slot.slot.id.clone(), candidate.material_id.clone()))
             })
             .collect();
         self.active_slot = Some(0);
@@ -248,8 +246,8 @@ impl StudioApp {
     fn available_roles(&self) -> Vec<String> {
         self.catalog
             .iter()
-            .flat_map(|catalog| catalog.segments.iter())
-            .flat_map(|segment| segment.roles.iter().cloned())
+            .flat_map(|catalog| catalog.materials.iter())
+            .flat_map(|material| material.roles.iter().cloned())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
@@ -471,7 +469,7 @@ impl StudioApp {
                     } else {
                         ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
                         ui.horizontal(|ui| {
-                            if ui.button("次: 区間を登録").clicked() {
+                            if ui.button("次: 素材の情報を登録").clicked() {
                                 editor.open = true;
                             }
                             theme::icon_button(
@@ -491,9 +489,12 @@ impl StudioApp {
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("登録済みの区間: {} 件", catalog.segments.len()))
-                            .size(10.0)
-                            .color(theme::MUTED),
+                        RichText::new(format!(
+                            "情報を登録済みの素材: {} 件",
+                            catalog.materials.len()
+                        ))
+                        .size(10.0)
+                        .color(theme::MUTED),
                     );
                     if self.catalog_path.is_some() {
                         ui.add(
@@ -677,17 +678,17 @@ impl StudioApp {
                         if candidate_card(
                             ui,
                             candidate,
-                            selected.as_deref() == Some(candidate.segment_id.as_str()),
+                            selected.as_deref() == Some(candidate.material_id.as_str()),
                             card_width,
                         ) {
-                            chosen = Some(candidate.segment_id.clone());
+                            chosen = Some(candidate.material_id.clone());
                         }
                     }
                 });
                 ui.add_space(4.0);
             }
-            if let Some(segment_id) = chosen {
-                self.selections.insert(slot_id, segment_id);
+            if let Some(material_id) = chosen {
+                self.selections.insert(slot_id, material_id);
                 self.status = "CANDIDATE SELECTED — STAGE の順序を確認して保存できます。".into();
             }
         });
@@ -709,7 +710,7 @@ impl StudioApp {
                         let candidate = selected_id.and_then(|id| {
                             slot.candidates
                                 .iter()
-                                .find(|candidate| candidate.segment_id == *id)
+                                .find(|candidate| candidate.material_id == *id)
                         });
                         (slot.slot.order, slot.slot.role.clone(), candidate.cloned())
                     })
@@ -721,12 +722,12 @@ impl StudioApp {
                 ui.set_min_height(32.0);
                 theme::caption(ui, "COMPOSITION STAGE");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    theme::badge(ui, &format!("{} CUTS", entries.len()), theme::ACCENT);
+                    theme::badge(ui, &format!("{} MATERIALS", entries.len()), theme::ACCENT);
                 });
             });
             ui.label(
                 RichText::new(
-                    "選んだ素材の順番と時間を、composition-manifest.json として保存します。素材そのものは含みません。",
+                    "選んだ素材の順番を、composition-manifest.json として保存します。素材そのものは含みません。",
                 )
                     .size(11.0)
                     .color(theme::MUTED),
@@ -742,18 +743,16 @@ impl StudioApp {
                 ui.add_space(24.0);
             }
             for (order, role, candidate) in &entries {
-                let (name, timing, source) = candidate.as_ref().map_or_else(
+                let (name, source) = candidate.as_ref().map_or_else(
                     || {
                         (
                             "UNSELECTED".to_owned(),
-                            "--".to_owned(),
                             "候補なし".to_owned(),
                         )
                     },
                     |candidate| {
                         (
-                            candidate.segment_id.clone(),
-                            format!("{}–{} ms", candidate.start_ms, candidate.end_ms),
+                            candidate.material_id.clone(),
                             candidate.source_path.clone(),
                         )
                     },
@@ -769,7 +768,7 @@ impl StudioApp {
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(name).size(12.0).strong());
                                 ui.label(
-                                    RichText::new(format!("{} / {}", role, timing))
+                                    RichText::new(role)
                                         .size(10.0)
                                         .color(theme::MUTED),
                                 );
@@ -804,7 +803,8 @@ impl eframe::App for StudioApp {
             && editor.show(context, !busy)
         {
             self.reload_catalog();
-            self.status = "CATALOG SAVED — 区間を保存しました。候補を再生成してください。".into();
+            self.status =
+                "CATALOG SAVED — 素材の情報を保存しました。候補を再生成してください。".into();
         }
         let (_, status_color, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
@@ -898,17 +898,8 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
                     }
                 });
                 ui.add(
-                    egui::Label::new(RichText::new(&candidate.segment_id).size(12.0).strong())
+                    egui::Label::new(RichText::new(&candidate.material_id).size(12.0).strong())
                         .truncate(),
-                );
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(format!("{}–{} ms", candidate.start_ms, candidate.end_ms))
-                            .monospace()
-                            .size(10.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
                 );
                 ui.add(
                     egui::Label::new(
@@ -931,7 +922,7 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         .response;
     let response = ui.interact(
         response.rect,
-        ui.id().with((&candidate.segment_id, candidate.start_ms)),
+        ui.id().with(&candidate.material_id),
         Sense::click(),
     );
     if selected || response.hovered() {
