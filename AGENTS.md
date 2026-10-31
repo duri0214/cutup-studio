@@ -62,7 +62,7 @@
 2. ブランチ名の先頭の数字を Issue 番号として扱い、Issue のタイトル、本文、ラベル、assignee、Project を確認する。
 3. `git diff --stat origin/<base>..HEAD`、`git diff --name-status origin/<base>..HEAD` でPRの差分を確認する。
 4. PR本文は日本語で、概要、主な変更点、目検手順、自動テストの範囲、`Closes #<Issue番号>` を含める。
-5. 目検手順は操作と期待値を `- [ ]` 形式で書く。実行していない確認を `[x]` にしない。
+5. 目検手順は操作と期待値を `- [ ]` 形式で書く。手入力を伴う手順には、選択対象、具体的な入力値、実行操作、期待結果を記し、`任意の値` や `適切な値` にしない。実行していない確認を `[x]` にせず、既存の `[x]` を更新時に `[ ]` へ戻さない。
 6. `gh pr create --base <base> --head <current-branch> --title "#<Issue番号> <Issueタイトル>" --body-file <body-file>` で作成し、作成後に URL、assignee、ラベル、Project を確認する。変更依頼に対しては、明示的な `PR不要` 指定がない限り作成または更新まで進める。
 
 git や gh の操作が失敗した場合は、API で迂回せず原因を切り分けて報告する。Project 操作の権限が不足する場合は、`gh auth refresh -s read:project -s project` が必要であることを伝える。
