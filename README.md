@@ -69,7 +69,7 @@ cargo run
 
 ## DEMO
 
-`DEMO` は `demo/` を素材フォルダとして使います。構造、同梱MP4の出典・利用条件は [demo/README.md](demo/README.md) を参照してください。
+`DEMO` は `demo/` を素材フォルダとして使います。日本語の合成音声で作った完成済みWAV素材10本と、その検索語句・役割を初回から使えます。素材一覧は [demo/README.md](demo/README.md) を参照してください。
 
 ## 開発
 
