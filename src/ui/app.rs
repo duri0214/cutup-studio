@@ -7,7 +7,7 @@ use std::{
 use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 
 use crate::{
-    domain::valueobject::catalog::{Metadata, ScanReport},
+    domain::valueobject::catalog::ScanReport,
     domain::{
         service::{create_plan, manifest_from_plan},
         valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
@@ -69,7 +69,7 @@ impl StudioApp {
         else {
             return;
         };
-        self.start_catalog_task(path, None, false, context);
+        self.start_catalog_task(path, None, context);
     }
 
     fn clear_active_catalog(&mut self) {
@@ -87,8 +87,8 @@ impl StudioApp {
         let root = demo_material_root();
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
-            Ok(true) => self.start_catalog_task(path, None, false, context),
-            Ok(false) => self.start_catalog_task(path, Some(root), true, context),
+            Ok(true) => self.start_catalog_task(path, None, context),
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
             Err(error) => {
                 self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — DEMO のカタログを確認できません: {error}");
@@ -118,7 +118,7 @@ impl StudioApp {
                     path.display()
                 );
             }
-            Ok(false) => self.start_catalog_task(path, Some(root), false, context),
+            Ok(false) => self.start_catalog_task(path, Some(root), context),
             Err(error) => {
                 self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — 保存先を確認できません: {error}");
@@ -130,7 +130,6 @@ impl StudioApp {
         &mut self,
         path: PathBuf,
         root: Option<PathBuf>,
-        seed_demo: bool,
         context: &egui::Context,
     ) {
         self.clear_active_catalog();
@@ -143,9 +142,6 @@ impl StudioApp {
                     None => SqliteCatalog::open(&path)?,
                 };
                 let report = store.rescan()?;
-                if seed_demo {
-                    seed_demo_metadata(&mut store)?;
-                }
                 Ok((store, path, report))
             })();
             let _ = sender.send(result);
@@ -486,7 +482,7 @@ impl StudioApp {
                         .inner
                     };
                     if rescan && let Some(path) = self.catalog_path.clone() {
-                        self.start_catalog_task(path, None, false, ui.ctx());
+                        self.start_catalog_task(path, None, ui.ctx());
                     }
                 }
             });
@@ -860,48 +856,6 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
-}
-
-fn seed_demo_metadata(store: &mut SqliteCatalog) -> Result<(), CatalogError> {
-    let seeds = [
-        (
-            "materials/01-tekkaman.wav",
-            "テッカマン",
-            "導入",
-            "主人公の名前",
-        ),
-        ("materials/02-ringo.wav", "りんご", "つなぎ", "短い名詞"),
-        (
-            "materials/03-ringo-ringo.wav",
-            "りんご りんご",
-            "反復",
-            "繰り返し",
-        ),
-        ("materials/04-takoyaki.wav", "たこやき", "つなぎ", "食べ物"),
-        ("materials/05-sugoi.wav", "すごい", "反応", "感嘆"),
-        ("materials/06-yabai.wav", "やばい", "反応", "感嘆"),
-        ("materials/07-ikuze.wav", "いくぜ", "展開", "掛け声"),
-        ("materials/08-nani.wav", "なに", "反応", "疑問"),
-        ("materials/09-don.wav", "どん", "効果", "短い効果音風の発話"),
-        ("materials/10-owatta.wav", "おわった", "終わり", "締め"),
-    ];
-    for material in store.materials()? {
-        if let Some((_, keywords, role, note)) = seeds
-            .iter()
-            .find(|(source_path, _, _, _)| *source_path == material.source_path.as_str())
-        {
-            store.save_metadata(
-                material.id,
-                &Metadata {
-                    keywords: keywords.split_whitespace().map(str::to_owned).collect(),
-                    tags: Vec::new(),
-                    roles: vec![(*role).to_owned()],
-                    note: (*note).to_owned(),
-                },
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {

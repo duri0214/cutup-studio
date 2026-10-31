@@ -75,7 +75,8 @@ impl CatalogEditor {
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
-        ui.strong("完成済みの素材に、検索語句・タグ・役割を登録します。");
+        ui.strong("仮組みでは、素材に入っている言葉・タグ・役割を手で登録します。");
+        ui.label("将来はローカルLLMがここを自動で埋めます。");
         ui.label("開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。");
         if self.materials.is_empty() {
             ui.separator();
