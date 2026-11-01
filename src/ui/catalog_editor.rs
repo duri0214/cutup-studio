@@ -4,6 +4,12 @@ use crate::{
 };
 use eframe::egui::{self, Ui};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EditorTab {
+    Search,
+    Metadata,
+}
+
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
     pub open: bool,
@@ -17,6 +23,7 @@ pub(super) struct CatalogEditor {
     query: String,
     tag_filter: String,
     role_filter: String,
+    active_tab: EditorTab,
     message: String,
 }
 
@@ -41,6 +48,7 @@ impl CatalogEditor {
             query: String::new(),
             tag_filter: String::new(),
             role_filter: String::new(),
+            active_tab: EditorTab::Search,
             message: String::new(),
         };
         editor.load_selected();
@@ -85,6 +93,77 @@ impl CatalogEditor {
             ui.label("2. この画面を閉じ、01 / MATERIAL CATALOG の更新アイコンを押します。");
             return false;
         }
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.active_tab, EditorTab::Search, "素材を探す");
+            ui.selectable_value(
+                &mut self.active_tab,
+                EditorTab::Metadata,
+                "素材の情報を登録",
+            );
+        });
+        ui.separator();
+        match self.active_tab {
+            EditorTab::Search => self.search_controls(ui),
+            EditorTab::Metadata => self.metadata_controls(ui),
+        }
+    }
+
+    fn search_controls(&mut self, ui: &mut Ui) -> bool {
+        ui.strong("素材を探す");
+        ui.label("検索結果から素材を選ぶと、素材情報の登録画面を開きます。");
+        ui.horizontal(|ui| {
+            ui.label("検索語句を含む");
+            ui.text_edit_singleline(&mut self.query);
+        });
+        ui.horizontal(|ui| {
+            ui.label("タグで絞り込み");
+            ui.add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0));
+            ui.label("役割で絞り込み");
+            ui.add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0));
+            if ui.button("検索").clicked() {
+                match self.refresh() {
+                    Ok(()) => self.message.clear(),
+                    Err(error) => self.message = error.to_string(),
+                }
+            }
+        });
+        ui.label(
+            "利用不能・要確認の素材も表示します。GUIDEの候補には利用可能な素材だけを使います。",
+        );
+        let mut selection = None;
+        egui::ScrollArea::vertical()
+            .id_salt("stored_materials")
+            .max_height(260.0)
+            .show(ui, |ui| {
+                for material in &self.stored_materials {
+                    if ui
+                        .selectable_label(
+                            self.material_id == Some(material.id),
+                            format!(
+                                "{} / {} / {}",
+                                material.source_path,
+                                material.availability.label(),
+                                material.metadata.keywords.join(", ")
+                            ),
+                        )
+                        .clicked()
+                    {
+                        selection = Some(material.id);
+                    }
+                }
+            });
+        if let Some(id) = selection {
+            self.material_id = Some(id);
+            self.load_selected();
+            self.active_tab = EditorTab::Metadata;
+        }
+        ui.label(&self.message);
+        false
+    }
+
+    fn metadata_controls(&mut self, ui: &mut Ui) -> bool {
+        ui.strong("素材の情報を登録");
+        ui.label("検索語句・タグ・役割は、この素材に保存する情報です。");
         let selected = self.material_id;
         egui::ComboBox::from_id_salt("material")
             .width(640.0)
@@ -115,53 +194,6 @@ impl CatalogEditor {
             self.load_selected();
         }
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("素材検索");
-            ui.text_edit_singleline(&mut self.query);
-        });
-        ui.horizontal(|ui| {
-            ui.label("タグ");
-            ui.add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0));
-            ui.label("役割");
-            ui.add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0));
-            if ui.button("検索").clicked() {
-                match self.refresh() {
-                    Ok(()) => self.message.clear(),
-                    Err(error) => self.message = error.to_string(),
-                }
-            }
-        });
-        ui.label(
-            "利用不能・要確認の素材も表示します。GUIDEの候補には利用可能な素材だけを使います。",
-        );
-        let mut selection = None;
-        egui::ScrollArea::vertical()
-            .id_salt("stored_materials")
-            .max_height(130.0)
-            .show(ui, |ui| {
-                for material in &self.stored_materials {
-                    if ui
-                        .selectable_label(
-                            self.material_id == Some(material.id),
-                            format!(
-                                "{} / {} / {}",
-                                material.source_path,
-                                material.availability.label(),
-                                material.metadata.keywords.join(", ")
-                            ),
-                        )
-                        .clicked()
-                    {
-                        selection = Some(material.id);
-                    }
-                }
-            });
-        if let Some(id) = selection {
-            self.material_id = Some(id);
-            self.load_selected();
-        }
-        ui.separator();
-        ui.label("選択中の素材の情報");
         egui::Grid::new("metadata").num_columns(2).show(ui, |ui| {
             for (label, value) in [
                 ("検索語句", &mut self.keywords),
