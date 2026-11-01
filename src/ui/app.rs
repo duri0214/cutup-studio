@@ -248,7 +248,7 @@ impl StudioApp {
             .collect();
         self.active_slot = Some(0);
         self.status = format!(
-            "{} SLOTS READY — 素材候補を選択して STAGE を確定します。",
+            "{}件の候補を表示しました — 素材を選び、04 / COMPOSITION を確認してください。",
             plan.slots.len()
         );
         self.plan = Some(plan);
@@ -654,7 +654,8 @@ impl StudioApp {
             }
             if let Some(material_id) = chosen {
                 self.selections.insert(slot_id, material_id);
-                self.status = "CANDIDATE SELECTED — STAGE の順序を確認して保存できます。".into();
+                self.status =
+                    "候補を選択しました — 04 / COMPOSITION の順序を確認して保存できます。".into();
             }
         });
         if next_active_index != active_index {
@@ -685,9 +686,9 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
-                theme::caption(ui, "COMPOSITION STAGE");
+                theme::caption(ui, "04 / COMPOSITION");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    theme::badge(ui, &format!("{} MATERIALS", entries.len()), theme::ACCENT);
+                    theme::badge(ui, &format!("{} 素材", entries.len()), theme::ACCENT);
                 });
             });
             ui.label(
@@ -736,7 +737,7 @@ impl StudioApp {
                 theme::action_button(
                     ui,
                     theme::ActionIcon::Save,
-                    "SAVE MANIFEST",
+                    "構成を保存",
                     true,
                     Vec2::new(210.0, 34.0),
                 )
@@ -831,25 +832,6 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.set_width(width - 24.0);
-                ui.horizontal(|ui| {
-                    theme::badge(
-                        ui,
-                        &format!("{} PT", candidate.score),
-                        if selected {
-                            theme::ACCENT
-                        } else {
-                            theme::MUTED
-                        },
-                    );
-                    if selected {
-                        ui.label(
-                            RichText::new("SELECTED")
-                                .size(10.0)
-                                .strong()
-                                .color(theme::ACCENT),
-                        );
-                    }
-                });
                 ui.add(
                     egui::Label::new(RichText::new(&candidate.source_path).size(12.0).strong())
                         .truncate(),
