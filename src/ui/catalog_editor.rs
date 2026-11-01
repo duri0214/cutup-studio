@@ -25,6 +25,7 @@ pub(super) struct CatalogEditor {
     tag_filter: String,
     role_filter: String,
     active_tab: EditorTab,
+    keep_open: bool,
     message: String,
 }
 
@@ -50,6 +51,7 @@ impl CatalogEditor {
             tag_filter: String::new(),
             role_filter: String::new(),
             active_tab: EditorTab::Search,
+            keep_open: false,
             message: String::new(),
         };
         editor.load_selected();
@@ -79,7 +81,7 @@ impl CatalogEditor {
                     changed = self.controls(ui);
                 });
             });
-        self.open = open;
+        self.open = self.open && open;
         changed
     }
 
@@ -277,13 +279,24 @@ impl CatalogEditor {
             .iter()
             .any(|material| Some(material.id) == self.material_id && material.available);
         let mut changed = false;
+        ui.checkbox(&mut self.keep_open, "連続で登録する");
+        let save_label = if self.keep_open {
+            "素材の情報を保存"
+        } else {
+            "保存して閉じる"
+        };
         if ui
-            .add_enabled(available, egui::Button::new("素材の情報を保存"))
+            .add_enabled(available, egui::Button::new(save_label))
             .clicked()
         {
             match self.save() {
                 Ok(()) => {
-                    self.message = "素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を生成できます。".into();
+                    self.message = if self.keep_open {
+                        "素材の情報を保存しました。続けて別の素材を登録できます。".into()
+                    } else {
+                        self.open = false;
+                        String::new()
+                    };
                     changed = true;
                 }
                 Err(error) => self.message = error.to_string(),

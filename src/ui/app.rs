@@ -790,7 +790,7 @@ impl eframe::App for StudioApp {
         {
             self.reload_catalog();
             self.status =
-                "CATALOG SAVED — 素材の情報を保存しました。候補を再生成してください。".into();
+                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を生成してください。".into();
         }
         let (_, status_color, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
