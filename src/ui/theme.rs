@@ -141,11 +141,13 @@ pub fn traffic_light(ui: &mut Ui, active: Signal) -> Response {
     response
 }
 
-pub fn role_badge(ui: &mut Ui, text: &str, color: Color32) {
+pub fn role_label(ui: &mut Ui, text: &str) {
     ui.allocate_ui_with_layout(
         Vec2::new(48.0, 24.0),
         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| badge(ui, text, color),
+        |ui| {
+            ui.label(RichText::new(text).size(11.0).color(TEXT));
+        },
     );
 }
 

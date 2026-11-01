@@ -505,7 +505,7 @@ impl StudioApp {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    theme::role_badge(ui, &guide_input.role, theme::ACCENT);
+                    theme::role_label(ui, &guide_input.role);
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut guide_input.query)
                             .desired_width(330.0)
