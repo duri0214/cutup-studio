@@ -20,7 +20,6 @@ pub enum ActionIcon {
     Open,
     Generate,
     Save,
-    Reset,
     Delete,
 }
 
@@ -288,9 +287,6 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         )),
         ActionIcon::Save => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/download.svg"
-        )),
-        ActionIcon::Reset => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/rotate-ccw.svg"
         )),
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))

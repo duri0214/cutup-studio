@@ -30,9 +30,9 @@ pub enum CatalogError {
     MissingMaterialsDirectory(String),
     #[error("素材パスは UTF-8 で表せる実在のフォルダを指定してください")]
     InvalidPath,
-    #[error("走査中に素材が変更されました。再走査してください")]
+    #[error("走査中に素材が変更されました。OPENで基準フォルダを開き直してください")]
     FileChanged,
-    #[error("素材が利用できません。再走査して確認してください")]
+    #[error("素材が利用できません。OPENで基準フォルダを開き直して確認してください")]
     Unavailable,
 }
 

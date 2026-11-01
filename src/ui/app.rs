@@ -174,7 +174,7 @@ impl StudioApp {
                 self.catalog_task = None;
                 self.clear_active_catalog();
                 self.status =
-                    "CATALOG ERROR — フォルダ走査が中断されました。再走査してください。".into();
+                    "CATALOG ERROR — フォルダ走査が中断されました。OPENで基準フォルダを開き直してください。".into();
                 return;
             }
         };
@@ -189,7 +189,7 @@ impl StudioApp {
                 self.catalog_path = Some(path);
                 self.reload_catalog();
                 self.status = if total == 0 {
-                    "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて RESCAN してください。".into()
+                    "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて OPEN で基準フォルダを開き直してください。".into()
                 } else {
                     format!(
                         "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を生成できます。",
@@ -229,7 +229,7 @@ impl StudioApp {
     fn build_plan(&mut self) {
         let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
-            self.status = "基準フォルダを開くか、materials フォルダを再走査してください。".into();
+            self.status = "OPEN で基準フォルダを開いてください。".into();
             return;
         };
         let plan = create_plan(catalog, &guide_text);
@@ -441,30 +441,13 @@ impl StudioApp {
                 );
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
-                    let rescan = if total == 0 {
-                        theme::icon_button(
-                            ui,
-                            theme::ActionIcon::Reset,
-                            "RESCAN — フォルダを再走査",
-                        )
-                        .clicked()
-                    } else {
-                        ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                    ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                    if total > 0 {
                         ui.horizontal(|ui| {
                             if ui.button("素材情報の編集").clicked() {
                                 editor.open = true;
                             }
-                            theme::icon_button(
-                                ui,
-                                theme::ActionIcon::Reset,
-                                "RESCAN — フォルダを再走査",
-                            )
-                            .clicked()
-                        })
-                        .inner
-                    };
-                    if rescan && let Some(path) = self.catalog_path.clone() {
-                        self.start_catalog_task(path, None, ui.ctx());
+                        });
                     }
                 }
             });
