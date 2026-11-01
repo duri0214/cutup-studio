@@ -95,7 +95,7 @@ impl CatalogEditor {
             return false;
         }
         ui.horizontal(|ui| {
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を選ぶ");
             Self::tab_button(
                 ui,
                 &mut self.active_tab,
@@ -141,60 +141,85 @@ impl CatalogEditor {
     }
 
     fn search_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label("検索語句を入力して Enter を押すと検索します。検索結果から素材を選ぶと、素材情報の登録画面を開きます。");
-        let mut search_requested = false;
+        ui.label("素材名や含まれる言葉を入力すると、候補を絞り込みます。選ぶと素材情報の登録画面を開きます。");
+        let mut filters_changed = false;
         ui.horizontal(|ui| {
-            ui.label("素材検索");
+            ui.label("言葉・素材名");
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
                     .desired_width(280.0)
                     .hint_text(egui::RichText::new("例: テッカマン").color(theme::MUTED)),
             );
-            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                search_requested = true;
-            }
-            if ui.button("検索").clicked() {
-                search_requested = true;
-            }
+            filters_changed |= response.changed();
         });
         ui.collapsing("詳細検索（タグ・役割）", |ui| {
             ui.horizontal(|ui| {
                 ui.label("タグで絞り込み");
-                ui.add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0));
+                filters_changed |= ui
+                    .add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0))
+                    .changed();
                 ui.label("役割で絞り込み");
-                ui.add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0));
+                filters_changed |= ui
+                    .add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0))
+                    .changed();
             });
         });
-        if search_requested {
+        if filters_changed {
             match self.refresh() {
                 Ok(()) => self.message.clear(),
                 Err(error) => self.message = error.to_string(),
             }
         }
+        let has_filter = !self.query.trim().is_empty()
+            || !self.tag_filter.trim().is_empty()
+            || !self.role_filter.trim().is_empty();
+        if !has_filter {
+            ui.label(egui::RichText::new("入力すると候補を表示します。").color(theme::MUTED));
+            return false;
+        }
         ui.label(
             "利用不能・要確認の素材も表示します。GUIDEの候補には利用可能な素材だけを使います。",
         );
         let mut selection = None;
-        egui::ScrollArea::vertical()
-            .id_salt("stored_materials")
-            .max_height(260.0)
+        egui::Frame::new()
+            .fill(theme::BACKGROUND)
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+            .inner_margin(4)
             .show(ui, |ui| {
-                for material in &self.stored_materials {
-                    if ui
-                        .selectable_label(
-                            self.material_id == Some(material.id),
-                            format!(
-                                "{} / {} / {}",
-                                material.source_path,
-                                material.availability.label(),
-                                material.metadata.keywords.join(", ")
-                            ),
-                        )
-                        .clicked()
-                    {
-                        selection = Some(material.id);
-                    }
-                }
+                egui::ScrollArea::vertical()
+                    .id_salt("stored_materials")
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        if self.stored_materials.is_empty() {
+                            ui.label(
+                                egui::RichText::new("一致する素材はありません。")
+                                    .color(theme::MUTED),
+                            );
+                        }
+                        for material in &self.stored_materials {
+                            let keywords = material.metadata.keywords.join(", ");
+                            let label = if keywords.is_empty() {
+                                format!(
+                                    "{} / {}",
+                                    material.source_path,
+                                    material.availability.label()
+                                )
+                            } else {
+                                format!(
+                                    "{} / {} / {}",
+                                    material.source_path,
+                                    material.availability.label(),
+                                    keywords
+                                )
+                            };
+                            if ui
+                                .selectable_label(self.material_id == Some(material.id), label)
+                                .clicked()
+                            {
+                                selection = Some(material.id);
+                            }
+                        }
+                    });
             });
         if let Some(id) = selection {
             self.material_id = Some(id);
