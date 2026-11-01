@@ -421,9 +421,8 @@ impl StudioApp {
                     {
                         self.open_catalog(ui.ctx());
                     }
-                    if theme::action_button(
+                    if theme::toggle_button(
                         ui,
-                        theme::ActionIcon::Reset,
                         "DEMO",
                         self.is_demo_catalog(),
                         Vec2::new(106.0, 32.0),

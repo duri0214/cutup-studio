@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontTweak, Frame,
-    Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
+    FontTweak, Frame, Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
@@ -220,6 +220,65 @@ pub fn action_button(
         button = button.fill(ACCENT).stroke(Stroke::new(1.0_f32, ACCENT));
     }
     ui.add_sized(size, button)
+}
+
+pub fn toggle_button(ui: &mut Ui, label: &str, on: bool, size: Vec2) -> Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let (fill, stroke, text_color) = if on && enabled {
+        (ACCENT.gamma_multiply(0.18), ACCENT, ACCENT)
+    } else if enabled {
+        (ui.visuals().widgets.inactive.bg_fill, BORDER, MUTED)
+    } else {
+        (PANEL, BORDER, MUTED)
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0_f32, stroke),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(12.0),
+        text_color,
+    );
+    let track = egui::Rect::from_center_size(
+        Pos2::new(rect.right() - 24.0, rect.center().y),
+        Vec2::new(28.0, 16.0),
+    );
+    ui.painter().rect_filled(
+        track,
+        CornerRadius::same(8),
+        if on {
+            ACCENT
+        } else {
+            MUTED.gamma_multiply(0.45)
+        },
+    );
+    let knob_x = if on {
+        track.right() - 8.0
+    } else {
+        track.left() + 8.0
+    };
+    ui.painter().circle_filled(
+        Pos2::new(knob_x, track.center().y),
+        6.0,
+        if on { BACKGROUND } else { TEXT },
+    );
+    response.on_hover_text(if on {
+        "DEMO は有効です"
+    } else {
+        "DEMO を開く"
+    })
 }
 
 fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {
