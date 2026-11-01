@@ -442,20 +442,16 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     let rescan = if total == 0 {
-                        ui.horizontal(|ui| {
-                            ui.label("次: 素材ファイルをフォルダに入れてから、更新を押します。");
-                            theme::icon_button(
-                                ui,
-                                theme::ActionIcon::Reset,
-                                "RESCAN — フォルダを再走査",
-                            )
-                            .clicked()
-                        })
-                        .inner
+                        theme::icon_button(
+                            ui,
+                            theme::ActionIcon::Reset,
+                            "RESCAN — フォルダを再走査",
+                        )
+                        .clicked()
                     } else {
                         ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
                         ui.horizontal(|ui| {
-                            if ui.button("次: 素材の情報を登録").clicked() {
+                            if ui.button("素材の登録・編集").clicked() {
                                 editor.open = true;
                             }
                             theme::icon_button(
