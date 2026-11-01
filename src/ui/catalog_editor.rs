@@ -1,6 +1,7 @@
 use crate::{
     domain::valueobject::catalog::*,
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
+    ui::theme,
 };
 use eframe::egui::{self, Ui};
 
@@ -94,17 +95,49 @@ impl CatalogEditor {
             return false;
         }
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active_tab, EditorTab::Search, "素材を探す");
-            ui.selectable_value(
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "1  素材を探す");
+            Self::tab_button(
+                ui,
                 &mut self.active_tab,
                 EditorTab::Metadata,
-                "素材の情報を登録",
+                "2  素材の情報を登録",
             );
         });
         ui.separator();
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
+        }
+    }
+
+    fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
+        let selected = *active_tab == tab;
+        let response =
+            ui.add_sized(
+                [184.0, 32.0],
+                egui::Button::new(egui::RichText::new(label).size(12.0).strong().color(
+                    if selected {
+                        theme::ACCENT
+                    } else {
+                        theme::MUTED
+                    },
+                ))
+                .fill(if selected {
+                    theme::ACCENT.gamma_multiply(0.18)
+                } else {
+                    ui.visuals().widgets.inactive.bg_fill
+                })
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    if selected {
+                        theme::ACCENT
+                    } else {
+                        theme::BORDER
+                    },
+                )),
+            );
+        if response.clicked() {
+            *active_tab = tab;
         }
     }
 
