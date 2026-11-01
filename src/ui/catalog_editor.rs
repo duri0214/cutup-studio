@@ -212,10 +212,7 @@ impl CatalogEditor {
                                     keywords
                                 )
                             };
-                            if ui
-                                .selectable_label(self.material_id == Some(material.id), label)
-                                .clicked()
-                            {
+                            if ui.selectable_label(false, label).clicked() {
                                 selection = Some(material.id);
                             }
                         }
