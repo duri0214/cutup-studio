@@ -95,7 +95,7 @@ impl CatalogEditor {
             return false;
         }
         ui.horizontal(|ui| {
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を選ぶ");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
             Self::tab_button(
                 ui,
                 &mut self.active_tab,
