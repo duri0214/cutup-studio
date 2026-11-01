@@ -237,19 +237,12 @@ impl StudioApp {
             self.status = "GUIDE に語句またはタグを入力してください。".into();
             return;
         }
-        self.selections = plan
-            .slots
-            .iter()
-            .filter_map(|slot| {
-                slot.candidates
-                    .first()
-                    .map(|candidate| (slot.slot.id.clone(), candidate.material_id.clone()))
-            })
-            .collect();
+        let candidate_count: usize = plan.slots.iter().map(|slot| slot.candidates.len()).sum();
+        self.selections.clear();
         self.active_slot = Some(0);
         self.status = format!(
-            "{}件の候補を表示しました — 素材を選び、04 / COMPOSITION を確認してください。",
-            plan.slots.len()
+            "{}件の候補を表示しました — 03 / CANDIDATES で素材を選んでください。",
+            candidate_count
         );
         self.plan = Some(plan);
     }
@@ -615,6 +608,11 @@ impl StudioApp {
         let mut next_active_index = active_index;
         theme::panel().show(ui, |ui| {
             section_header(ui, "03 / CANDIDATES", signal, status);
+            ui.label(
+                RichText::new("この役割に使う素材を一つ選びます。")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
             ui.horizontal_wrapped(|ui| {
                 for (index, label) in slot_tabs.iter().enumerate() {
                     if ui.selectable_label(index == active_index, label).clicked() {
@@ -657,7 +655,7 @@ impl StudioApp {
             if let Some(material_id) = chosen {
                 self.selections.insert(slot_id, material_id);
                 self.status =
-                    "候補を選択しました — 04 / COMPOSITION の順序を確認して保存できます。".into();
+                    "候補を選択しました — ほかの役割も選び、04 / COMPOSITION で全体を確認してください。".into();
             }
         });
         if next_active_index != active_index {
@@ -685,20 +683,29 @@ impl StudioApp {
                     .collect()
             })
             .unwrap_or_default();
+        let selected_count = entries
+            .iter()
+            .filter(|(_, _, candidate)| candidate.is_some())
+            .count();
+        let composition_ready = !entries.is_empty() && selected_count == entries.len();
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
                 theme::caption(ui, "04 / COMPOSITION");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    theme::badge(ui, &format!("{} 素材", entries.len()), theme::ACCENT);
+                    theme::badge(
+                        ui,
+                        &format!("選択 {} / {}", selected_count, entries.len()),
+                        theme::ACCENT,
+                    );
                 });
             });
             ui.label(
                 RichText::new(
-                    "選んだ素材の順番を、composition-manifest.json として保存します。素材そのものは含みません。",
+                    "03で選んだ素材の順番を一覧で確認します。すべて選ぶと構成を保存できます。",
                 )
-                    .size(11.0)
-                    .color(theme::MUTED),
+                .size(11.0)
+                .color(theme::MUTED),
             );
             ui.add_space(8.0);
             if entries.is_empty() {
@@ -711,9 +718,10 @@ impl StudioApp {
                 ui.add_space(24.0);
             }
             for (order, role, candidate) in &entries {
-                let source = candidate
-                    .as_ref()
-                    .map_or_else(|| "候補なし".to_owned(), |candidate| candidate.source_path.clone());
+                let source = candidate.as_ref().map_or_else(
+                    || "素材を選んでください".to_owned(),
+                    |candidate| candidate.source_path.clone(),
+                );
                 Frame::new()
                     .fill(Color32::from_rgb(18, 39, 43))
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
@@ -724,28 +732,24 @@ impl StudioApp {
                             theme::badge(ui, &format!("{:02}", order), theme::ACCENT);
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(source).size(12.0).strong());
-                                ui.label(
-                                    RichText::new(role)
-                                        .size(10.0)
-                                        .color(theme::MUTED),
-                                );
+                                ui.label(RichText::new(role).size(10.0).color(theme::MUTED));
                             });
                         });
                     });
                 ui.add_space(3.0);
             }
-            ui.add_space(8.0);
-            let save_response = ui.add_enabled_ui(!entries.is_empty(), |ui| {
-                theme::action_button(
+            if composition_ready {
+                ui.add_space(8.0);
+                let save_response = theme::action_button(
                     ui,
                     theme::ActionIcon::Save,
                     "構成を保存",
                     true,
                     Vec2::new(210.0, 34.0),
-                )
-            });
-            if save_response.inner.clicked() {
-                self.save_manifest();
+                );
+                if save_response.clicked() {
+                    self.save_manifest();
+                }
             }
         });
     }
@@ -834,6 +838,9 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.set_width(width - 24.0);
+                if selected {
+                    theme::badge(ui, "選択中", theme::ACCENT);
+                }
                 ui.add(
                     egui::Label::new(RichText::new(&candidate.source_path).size(12.0).strong())
                         .truncate(),
