@@ -643,9 +643,17 @@ impl StudioApp {
                 ui.add_space(4.0);
             }
             if let Some(material_id) = chosen {
-                self.selections.insert(slot_id, material_id);
-                self.status =
-                    "候補を選択しました — ほかの役割も選び、03 / COMPOSITION で全体を確認してください。".into();
+                if selected.as_deref() == Some(material_id.as_str()) {
+                    self.selections.remove(&slot_id);
+                    self.status =
+                        "候補の選択を解除しました — 02 / COMPOSITION GUIDE で素材を選んでください。"
+                            .into();
+                } else {
+                    self.selections.insert(slot_id, material_id);
+                    self.status =
+                        "候補を選択しました — ほかの役割も選び、03 / COMPOSITION で全体を確認してください。"
+                            .into();
+                }
             }
         }
         if next_active_index != active_index {
@@ -857,5 +865,11 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
             egui::StrokeKind::Inside,
         );
     }
-    response.clicked()
+    response
+        .on_hover_text(if selected {
+            "クリックで選択を解除"
+        } else {
+            "クリックで選択"
+        })
+        .clicked()
 }
