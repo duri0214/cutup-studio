@@ -173,9 +173,9 @@ impl SqliteCatalog {
             "1"
         } else if uses_fts {
             "(m.id IN (SELECT rowid FROM material_fts WHERE material_fts MATCH ?1)
-              OR instr(lower(m.source_path),?5)>0)"
+              OR instr(lower(substr(m.source_path,11)),?5)>0)"
         } else {
-            "instr(lower(m.source_path || ' ' || m.search_text),?5)>0"
+            "instr(lower(substr(m.source_path,11) || ' ' || m.search_text),?5)>0"
         };
         let query = if uses_fts {
             format!("\"{}\"", text.replace('"', "\"\""))
