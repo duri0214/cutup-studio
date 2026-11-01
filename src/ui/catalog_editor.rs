@@ -103,7 +103,7 @@ impl CatalogEditor {
                 "素材の情報を登録",
             );
         });
-        ui.separator();
+        ui.add_space(6.0);
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
@@ -149,7 +149,7 @@ impl CatalogEditor {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
                     .desired_width(280.0)
-                    .hint_text("例: テッカマン"),
+                    .hint_text(egui::RichText::new("例: テッカマン").color(theme::MUTED)),
             );
             if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                 search_requested = true;
