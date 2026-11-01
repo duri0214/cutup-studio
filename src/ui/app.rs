@@ -616,18 +616,24 @@ impl StudioApp {
                     .size(11.0)
                     .color(theme::MUTED),
             );
-            ui.horizontal_wrapped(|ui| {
-                for (index, label) in slot_tabs.iter().enumerate() {
-                    if ui.selectable_label(index == active_index, label).clicked() {
-                        next_active_index = index;
+            if slot_tabs.len() > 1 {
+                ui.horizontal_wrapped(|ui| {
+                    for (index, label) in slot_tabs.iter().enumerate() {
+                        if ui.selectable_label(index == active_index, label).clicked() {
+                            next_active_index = index;
+                        }
                     }
-                }
-            });
-            ui.add_space(6.0);
+                });
+                ui.add_space(6.0);
+            }
             ui.label(
-                RichText::new(format!("{} / {}", slot.slot.role, slot.slot.query))
-                    .size(11.0)
-                    .color(theme::MUTED),
+                RichText::new(if slot_tabs.len() == 1 {
+                    format!("役割: {} / 語句: {}", slot.slot.role, slot.slot.query)
+                } else {
+                    format!("語句: {}", slot.slot.query)
+                })
+                .size(11.0)
+                .color(theme::MUTED),
             );
             ui.add_space(4.0);
             if candidates.is_empty() {
