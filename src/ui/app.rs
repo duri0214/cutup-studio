@@ -485,6 +485,7 @@ impl StudioApp {
     fn show_guide_controls(&mut self, ui: &mut Ui) {
         let available_roles = self.available_roles();
         let (signal, status) = self.guide_status();
+        let can_show_candidates = self.catalog.is_some() && !self.guide_text().is_empty();
         let mut role_to_add = None;
         theme::panel().show(ui, |ui| {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
@@ -567,14 +568,15 @@ impl StudioApp {
                     query: String::new(),
                 });
             }
-            if theme::action_button(
-                ui,
-                theme::ActionIcon::Generate,
-                "候補を表示",
-                true,
-                Vec2::new(250.0, 32.0),
-            )
-            .clicked()
+            if can_show_candidates
+                && theme::action_button(
+                    ui,
+                    theme::ActionIcon::Generate,
+                    "候補を表示",
+                    true,
+                    Vec2::new(160.0, 32.0),
+                )
+                .clicked()
             {
                 self.build_plan();
             }
