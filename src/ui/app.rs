@@ -192,7 +192,7 @@ impl StudioApp {
                     "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて OPEN で基準フォルダを開き直してください。".into()
                 } else {
                     format!(
-                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を生成できます。",
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を選べます。",
                         report.added, report.changed, report.missing, report.restored
                     )
                 };
@@ -247,7 +247,7 @@ impl StudioApp {
         self.selections.clear();
         self.active_slot = Some(0);
         self.status = format!(
-            "{}件の候補を表示しました — 03 / CANDIDATES で素材を選んでください。",
+            "{}件の候補を表示しました — 02 / COMPOSITION GUIDE で素材を選んでください。",
             candidate_count
         );
         self.plan = Some(plan);
@@ -317,19 +317,6 @@ impl StudioApp {
     }
 
     fn guide_status(&self) -> (theme::Signal, &'static str) {
-        if self.catalog.is_none() {
-            (
-                theme::Signal::Attention,
-                "01 の素材カタログを開いてください",
-            )
-        } else if self.plan.is_some() {
-            (theme::Signal::Ready, "入力内容を候補へ反映済みです")
-        } else {
-            (theme::Signal::Attention, "語句またはタグを入力してください")
-        }
-    }
-
-    fn candidates_status(&self) -> (theme::Signal, &'static str) {
         if self.catalog.is_none() {
             (
                 theme::Signal::Attention,
@@ -573,14 +560,17 @@ impl StudioApp {
                     query: String::new(),
                 });
             }
+            if guide_changed {
+                self.build_plan();
+            }
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+            self.show_candidates(ui);
         });
-        if guide_changed {
-            self.build_plan();
-        }
     }
 
-    fn show_candidate_grid(&mut self, ui: &mut Ui) {
-        let (signal, status) = self.candidates_status();
+    fn show_candidates(&mut self, ui: &mut Ui) {
         let slot_tabs: Vec<_> = self
             .plan
             .as_ref()
@@ -597,11 +587,9 @@ impl StudioApp {
             .as_ref()
             .and_then(|plan| plan.slots.get(active_index));
         let Some(slot) = active_slot else {
-            theme::panel().show(ui, |ui| {
-                section_header(ui, "03 / CANDIDATES", signal, status);
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("候補はここに表示されます").color(theme::MUTED));
-                });
+            ui.label(RichText::new("候補").size(11.0).strong());
+            ui.centered_and_justified(|ui| {
+                ui.label(RichText::new("語句を入力すると候補が表示されます").color(theme::MUTED));
             });
             return;
         };
@@ -609,41 +597,34 @@ impl StudioApp {
         let candidates = slot.candidates.clone();
         let selected = self.selections.get(&slot_id).cloned();
         let mut next_active_index = active_index;
-        theme::panel().show(ui, |ui| {
-            section_header(ui, "03 / CANDIDATES", signal, status);
-            ui.label(
-                RichText::new("この役割に使う素材を一つ選びます。")
-                    .size(11.0)
-                    .color(theme::MUTED),
-            );
-            if slot_tabs.len() > 1 {
-                ui.horizontal_wrapped(|ui| {
-                    for (index, label) in slot_tabs.iter().enumerate() {
-                        if ui.selectable_label(index == active_index, label).clicked() {
-                            next_active_index = index;
-                        }
+        ui.label(RichText::new("候補").size(11.0).strong());
+        if slot_tabs.len() > 1 {
+            ui.horizontal_wrapped(|ui| {
+                for (index, label) in slot_tabs.iter().enumerate() {
+                    if ui.selectable_label(index == active_index, label).clicked() {
+                        next_active_index = index;
                     }
-                });
-                ui.add_space(6.0);
-            }
-            ui.label(
-                RichText::new(if slot_tabs.len() == 1 {
-                    format!("役割: {} / 語句: {}", slot.slot.role, slot.slot.query)
-                } else {
-                    format!("語句: {}", slot.slot.query)
-                })
-                .size(11.0)
-                .color(theme::MUTED),
+                }
+            });
+            ui.add_space(6.0);
+        }
+        ui.label(
+            RichText::new(if slot_tabs.len() == 1 {
+                format!("役割: {} / 語句: {}", slot.slot.role, slot.slot.query)
+            } else {
+                format!("語句: {}", slot.slot.query)
+            })
+            .size(11.0)
+            .color(theme::MUTED),
+        );
+        ui.add_space(4.0);
+        if candidates.is_empty() {
+            ui.add_space(18.0);
+            ui.colored_label(
+                theme::RED,
+                "候補がありません。ガイドの語句・タグ・役割を確認してください。",
             );
-            ui.add_space(4.0);
-            if candidates.is_empty() {
-                ui.add_space(18.0);
-                ui.colored_label(
-                    theme::RED,
-                    "候補がありません。ガイドの語句・タグ・役割を確認してください。",
-                );
-                return;
-            }
+        } else {
             let card_width = ((ui.available_width() - 12.0) / 2.0).max(180.0);
             let mut chosen = None;
             for row in candidates.chunks(2) {
@@ -664,9 +645,9 @@ impl StudioApp {
             if let Some(material_id) = chosen {
                 self.selections.insert(slot_id, material_id);
                 self.status =
-                    "候補を選択しました — ほかの役割も選び、04 / COMPOSITION で全体を確認してください。".into();
+                    "候補を選択しました — ほかの役割も選び、03 / COMPOSITION で全体を確認してください。".into();
             }
-        });
+        }
         if next_active_index != active_index {
             self.active_slot = Some(next_active_index);
             ui.ctx().request_repaint();
@@ -700,7 +681,7 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
-                theme::caption(ui, "04 / COMPOSITION");
+                theme::caption(ui, "03 / COMPOSITION");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     theme::badge(
                         ui,
@@ -711,7 +692,7 @@ impl StudioApp {
             });
             ui.label(
                 RichText::new(
-                    "03で選んだ素材の順番を一覧で確認します。すべて選ぶと構成を保存できます。",
+                    "02で選んだ素材の順番を一覧で確認します。すべて選ぶと構成を保存できます。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -776,7 +757,7 @@ impl eframe::App for StudioApp {
         {
             self.reload_catalog();
             self.status =
-                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を生成してください。".into();
+                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
         }
         let (_, status_color, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
@@ -796,9 +777,6 @@ impl eframe::App for StudioApp {
                         self.show_catalog_controls(controls);
                         controls.add_space(8.0);
                         controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
-                        controls.add_space(10.0);
-                        self.show_candidate_grid(controls);
-
                         let stage = &mut columns[1];
                         stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                     });
