@@ -542,7 +542,7 @@ impl StudioApp {
                             .desired_width(330.0)
                             .min_size(Vec2::new(330.0, 28.0))
                             .margin(egui::Margin::symmetric(8, 4))
-                            .hint_text("探したい語句・タグ"),
+                            .hint_text(RichText::new("探したい語句・タグ").color(theme::MUTED)),
                     );
                     if can_remove
                         && theme::icon_button(ui, theme::ActionIcon::Delete, "このスロットを削除")
