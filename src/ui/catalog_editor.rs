@@ -142,23 +142,36 @@ impl CatalogEditor {
 
     fn search_controls(&mut self, ui: &mut Ui) -> bool {
         ui.strong("素材を探す");
-        ui.label("検索結果から素材を選ぶと、素材情報の登録画面を開きます。");
+        ui.label("検索語句を入力して Enter を押すと検索します。検索結果から素材を選ぶと、素材情報の登録画面を開きます。");
+        let mut search_requested = false;
         ui.horizontal(|ui| {
-            ui.label("検索語句を含む");
-            ui.text_edit_singleline(&mut self.query);
-        });
-        ui.horizontal(|ui| {
-            ui.label("タグで絞り込み");
-            ui.add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0));
-            ui.label("役割で絞り込み");
-            ui.add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0));
+            ui.label("素材検索");
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .desired_width(280.0)
+                    .hint_text("例: テッカマン"),
+            );
+            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                search_requested = true;
+            }
             if ui.button("検索").clicked() {
-                match self.refresh() {
-                    Ok(()) => self.message.clear(),
-                    Err(error) => self.message = error.to_string(),
-                }
+                search_requested = true;
             }
         });
+        ui.collapsing("詳細検索（タグ・役割）", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("タグで絞り込み");
+                ui.add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0));
+                ui.label("役割で絞り込み");
+                ui.add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0));
+            });
+        });
+        if search_requested {
+            match self.refresh() {
+                Ok(()) => self.message.clear(),
+                Err(error) => self.message = error.to_string(),
+            }
+        }
         ui.label(
             "利用不能・要確認の素材も表示します。GUIDEの候補には利用可能な素材だけを使います。",
         );
