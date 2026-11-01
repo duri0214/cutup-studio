@@ -230,20 +230,7 @@ pub fn toggle_button(ui: &mut Ui, label: &str, on: bool, size: Vec2) -> Response
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    let (fill, stroke, text_color) = if on && enabled {
-        (ACCENT.gamma_multiply(0.18), ACCENT, ACCENT)
-    } else if enabled {
-        (ui.visuals().widgets.inactive.bg_fill, BORDER, MUTED)
-    } else {
-        (PANEL, BORDER, MUTED)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(6),
-        Stroke::new(1.0_f32, stroke),
-        StrokeKind::Inside,
-    );
+    let text_color = if on && enabled { ACCENT } else { MUTED };
     ui.painter().text(
         Pos2::new(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,
