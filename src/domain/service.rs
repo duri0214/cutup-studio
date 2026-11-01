@@ -140,23 +140,15 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
 
 pub fn manifest_from_plan(
     plan: &Plan,
-    selections: &BTreeMap<String, String>,
+    selections: &BTreeMap<String, Candidate>,
 ) -> Result<Manifest, DomainError> {
     let entries = plan
         .slots
         .iter()
         .map(|slot_plan| {
-            let selection = selections
+            let candidate = selections
                 .get(&slot_plan.slot.id)
                 .ok_or_else(|| DomainError::MissingSelection(slot_plan.slot.id.clone()))?;
-            let candidate = slot_plan
-                .candidates
-                .iter()
-                .find(|candidate| candidate.material_id == *selection)
-                .ok_or_else(|| DomainError::CandidateNotFound {
-                    slot: slot_plan.slot.id.clone(),
-                    candidate: selection.clone(),
-                })?;
             Ok(ManifestEntry {
                 order: slot_plan.slot.order,
                 slot_id: slot_plan.slot.id.clone(),
@@ -217,12 +209,27 @@ mod tests {
     fn selected_candidates_make_traceable_manifest() {
         let plan = create_plan(&catalog(), "導入: テッカマン\nつなぎ: 驚き 反応");
         let selections = BTreeMap::from([
-            ("slot-1".to_owned(), "tekkaman".to_owned()),
-            ("slot-2".to_owned(), "surprised-reaction".to_owned()),
+            ("slot-1".to_owned(), plan.slots[0].candidates[0].clone()),
+            ("slot-2".to_owned(), plan.slots[1].candidates[0].clone()),
         ]);
         let manifest = manifest_from_plan(&plan, &selections).unwrap();
         assert_eq!(manifest.entries[0].source_path, "anime/01-tekkaman.mp4");
         assert_eq!(manifest.entries[1].material_id, "surprised-reaction");
+    }
+
+    #[test]
+    fn manifest_keeps_explicit_selection_after_query_changes() {
+        let selected_plan = create_plan(&catalog(), "導入: テッカマン");
+        let selections = BTreeMap::from([(
+            "slot-1".to_owned(),
+            selected_plan.slots[0].candidates[0].clone(),
+        )]);
+        let changed_plan = create_plan(&catalog(), "導入: 見つからない語句");
+
+        let manifest = manifest_from_plan(&changed_plan, &selections).unwrap();
+
+        assert_eq!(manifest.entries[0].material_id, "tekkaman");
+        assert_eq!(manifest.entries[0].query, "見つからない語句");
     }
 
     #[test]

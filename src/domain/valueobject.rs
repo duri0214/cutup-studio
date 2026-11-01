@@ -15,8 +15,6 @@ pub enum DomainError {
     DuplicateId(String),
     #[error("スロット `{0}` の選択がありません")]
     MissingSelection(String),
-    #[error("スロット `{slot}` に候補 `{candidate}` はありません")]
-    CandidateNotFound { slot: String, candidate: String },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

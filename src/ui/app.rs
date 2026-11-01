@@ -35,7 +35,7 @@ pub struct StudioApp {
     catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
-    selections: BTreeMap<String, String>,
+    selections: BTreeMap<String, Candidate>,
     active_slot: Option<usize>,
     dragged_guide_index: Option<usize>,
     status: String,
@@ -244,7 +244,8 @@ impl StudioApp {
             return;
         }
         let candidate_count: usize = plan.slots.iter().map(|slot| slot.candidates.len()).sum();
-        self.selections.clear();
+        self.selections
+            .retain(|slot_id, _| plan.slots.iter().any(|slot| slot.slot.id == *slot_id));
         self.active_slot = Some(0);
         self.status = format!(
             "{}件の候補を表示しました — 02 / COMPOSITION GUIDE で素材を選んでください。",
@@ -476,6 +477,7 @@ impl StudioApp {
         let (signal, status) = self.guide_status();
         let mut role_to_add = None;
         let mut guide_changed = false;
+        let mut reset_selections = false;
         theme::panel().show(ui, |ui| {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(
@@ -540,6 +542,7 @@ impl StudioApp {
             if let Some(index) = remove_index {
                 self.guide_inputs.remove(index);
                 guide_changed = true;
+                reset_selections = true;
             }
             if let Some(index) = drag_started {
                 self.dragged_guide_index = Some(index);
@@ -551,6 +554,7 @@ impl StudioApp {
                     let guide_input = self.guide_inputs.remove(from);
                     self.guide_inputs.insert(to, guide_input);
                     guide_changed = true;
+                    reset_selections = true;
                 }
                 self.dragged_guide_index = None;
             }
@@ -561,6 +565,9 @@ impl StudioApp {
                 });
             }
             if guide_changed {
+                if reset_selections {
+                    self.selections.clear();
+                }
                 self.build_plan();
             }
             ui.add_space(8.0);
@@ -633,23 +640,28 @@ impl StudioApp {
                         if candidate_card(
                             ui,
                             candidate,
-                            selected.as_deref() == Some(candidate.material_id.as_str()),
+                            selected.as_ref().is_some_and(|current| {
+                                current.material_id == candidate.material_id
+                            }),
                             card_width,
                         ) {
-                            chosen = Some(candidate.material_id.clone());
+                            chosen = Some(candidate.clone());
                         }
                     }
                 });
                 ui.add_space(4.0);
             }
-            if let Some(material_id) = chosen {
-                if selected.as_deref() == Some(material_id.as_str()) {
+            if let Some(candidate) = chosen {
+                if selected
+                    .as_ref()
+                    .is_some_and(|current| current.material_id == candidate.material_id)
+                {
                     self.selections.remove(&slot_id);
                     self.status =
                         "候補の選択を解除しました — 02 / COMPOSITION GUIDE で素材を選んでください。"
                             .into();
                 } else {
-                    self.selections.insert(slot_id, material_id);
+                    self.selections.insert(slot_id, candidate);
                     self.status =
                         "候補を選択しました — ほかの役割も選び、03 / COMPOSITION で全体を確認してください。"
                             .into();
@@ -670,13 +682,8 @@ impl StudioApp {
                 plan.slots
                     .iter()
                     .map(|slot| {
-                        let selected_id = self.selections.get(&slot.slot.id);
-                        let candidate = selected_id.and_then(|id| {
-                            slot.candidates
-                                .iter()
-                                .find(|candidate| candidate.material_id == *id)
-                        });
-                        (slot.slot.order, slot.slot.role.clone(), candidate.cloned())
+                        let candidate = self.selections.get(&slot.slot.id).cloned();
+                        (slot.slot.order, slot.slot.role.clone(), candidate)
                     })
                     .collect()
             })
