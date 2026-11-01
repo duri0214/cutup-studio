@@ -192,7 +192,7 @@ impl StudioApp {
                     "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて RESCAN してください。".into()
                 } else {
                     format!(
-                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録して GUIDE から候補を生成できます。",
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を生成できます。",
                         report.added, report.changed, report.missing, report.restored
                     )
                 };

@@ -283,7 +283,7 @@ impl CatalogEditor {
         {
             match self.save() {
                 Ok(()) => {
-                    self.message = "素材の情報を保存しました。GUIDEから候補を生成できます。".into();
+                    self.message = "素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を生成できます。".into();
                     changed = true;
                 }
                 Err(error) => self.message = error.to_string(),
