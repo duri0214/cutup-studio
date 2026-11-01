@@ -141,7 +141,6 @@ impl CatalogEditor {
     }
 
     fn search_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.strong("素材を探す");
         ui.label("検索語句を入力して Enter を押すと検索します。検索結果から素材を選ぶと、素材情報の登録画面を開きます。");
         let mut search_requested = false;
         ui.horizontal(|ui| {
@@ -207,7 +206,6 @@ impl CatalogEditor {
     }
 
     fn metadata_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.strong("素材の情報を登録");
         ui.label("検索語句・タグ・役割は、この素材に保存する情報です。");
         let selected = self.material_id;
         egui::ComboBox::from_id_salt("material")
