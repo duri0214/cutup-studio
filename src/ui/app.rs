@@ -710,11 +710,9 @@ impl StudioApp {
                 });
                 ui.add_space(24.0);
             }
-            for (order, role, candidate) in &entries {
-                let source = candidate.as_ref().map_or_else(
-                    || "素材を選んでください".to_owned(),
-                    |candidate| candidate.source_path.clone(),
-                );
+            for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
+                candidate.as_ref().map(|candidate| (order, role, candidate))
+            }) {
                 Frame::new()
                     .fill(Color32::from_rgb(18, 39, 43))
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
@@ -724,7 +722,7 @@ impl StudioApp {
                         ui.horizontal(|ui| {
                             theme::badge(ui, &format!("{:02}", order), theme::ACCENT);
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(source).size(12.0).strong());
+                                ui.label(RichText::new(&candidate.source_path).size(12.0).strong());
                                 ui.label(RichText::new(role).size(10.0).color(theme::MUTED));
                             });
                         });
