@@ -167,15 +167,17 @@ impl SqliteCatalog {
 
     pub fn search(&self, filter: &SearchFilter<'_>) -> Result<Vec<StoredMaterial>, CatalogError> {
         let text = filter.text.trim().to_lowercase();
+        let has_text = !text.is_empty();
+        let uses_fts = text.chars().count() >= 3;
         let text_clause = if text.is_empty() {
             "1"
-        } else if text.chars().count() >= 3 {
+        } else if uses_fts {
             "(m.id IN (SELECT rowid FROM material_fts WHERE material_fts MATCH ?1)
               OR instr(lower(m.source_path),?5)>0)"
         } else {
             "instr(lower(m.source_path || ' ' || m.search_text),?5)>0"
         };
-        let query = if text.chars().count() >= 3 {
+        let query = if uses_fts {
             format!("\"{}\"", text.replace('"', "\"\""))
         } else {
             text.clone()
@@ -190,13 +192,22 @@ impl SqliteCatalog {
              ORDER BY m.source_path,m.id"
         );
         let mut statement = self.connection.prepare(&sql)?;
-        let mut rows = statement.query(params![
-            query,
-            filter.include_unavailable,
-            filter.tag,
-            filter.role,
-            text
-        ])?;
+        let mut rows = if has_text {
+            statement.query(params![
+                query,
+                filter.include_unavailable,
+                filter.tag,
+                filter.role,
+                text
+            ])?
+        } else {
+            statement.query(params![
+                query,
+                filter.include_unavailable,
+                filter.tag,
+                filter.role
+            ])?
+        };
         let mut materials = Vec::new();
         while let Some(row) = rows.next()? {
             let metadata_json: String = row.get(2)?;
