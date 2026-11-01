@@ -451,7 +451,7 @@ impl StudioApp {
                     } else {
                         ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
                         ui.horizontal(|ui| {
-                            if ui.button("素材の登録・編集").clicked() {
+                            if ui.button("素材情報の編集").clicked() {
                                 editor.open = true;
                             }
                             theme::icon_button(
