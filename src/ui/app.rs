@@ -570,7 +570,7 @@ impl StudioApp {
             if theme::action_button(
                 ui,
                 theme::ActionIcon::Generate,
-                "GENERATE CANDIDATES",
+                "候補を表示",
                 true,
                 Vec2::new(250.0, 32.0),
             )
