@@ -708,20 +708,9 @@ impl StudioApp {
                 ui.add_space(24.0);
             }
             for (order, role, candidate) in &entries {
-                let (name, source) = candidate.as_ref().map_or_else(
-                    || {
-                        (
-                            "UNSELECTED".to_owned(),
-                            "候補なし".to_owned(),
-                        )
-                    },
-                    |candidate| {
-                        (
-                            candidate.material_id.clone(),
-                            candidate.source_path.clone(),
-                        )
-                    },
-                );
+                let source = candidate
+                    .as_ref()
+                    .map_or_else(|| "候補なし".to_owned(), |candidate| candidate.source_path.clone());
                 Frame::new()
                     .fill(Color32::from_rgb(18, 39, 43))
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
@@ -731,13 +720,12 @@ impl StudioApp {
                         ui.horizontal(|ui| {
                             theme::badge(ui, &format!("{:02}", order), theme::ACCENT);
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(name).size(12.0).strong());
+                                ui.label(RichText::new(source).size(12.0).strong());
                                 ui.label(
                                     RichText::new(role)
                                         .size(10.0)
                                         .color(theme::MUTED),
                                 );
-                                ui.label(RichText::new(source).size(10.0).color(theme::MUTED));
                             });
                         });
                     });
@@ -863,16 +851,8 @@ fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32
                     }
                 });
                 ui.add(
-                    egui::Label::new(RichText::new(&candidate.material_id).size(12.0).strong())
+                    egui::Label::new(RichText::new(&candidate.source_path).size(12.0).strong())
                         .truncate(),
-                );
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(&candidate.source_path)
-                            .size(10.0)
-                            .color(theme::MUTED),
-                    )
-                    .truncate(),
                 );
                 ui.add(
                     egui::Label::new(
