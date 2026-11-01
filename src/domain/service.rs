@@ -89,8 +89,21 @@ pub fn create_plan(catalog: &Catalog, guide_text: &str) -> Plan {
 }
 
 fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candidate> {
+    if !material
+        .roles
+        .iter()
+        .any(|role| role.eq_ignore_ascii_case(&slot.role))
+    {
+        return None;
+    }
     let mut score = 0;
     let mut reasons = Vec::new();
+    let file_name = material
+        .source_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&material.source_path);
+    let normalized_file_name = file_name.to_lowercase();
     let searchable = format!(
         "{} {} {} {}",
         material.keywords.join(" "),
@@ -99,14 +112,6 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
         material.note
     )
     .to_lowercase();
-    if material
-        .roles
-        .iter()
-        .any(|role| role.eq_ignore_ascii_case(&slot.role))
-    {
-        score += 4;
-        reasons.push(format!("役割「{}」が一致", slot.role));
-    }
     for term in slot
         .query
         .split(|character: char| {
@@ -114,9 +119,13 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
         })
         .filter(|term| !term.is_empty())
     {
-        if searchable.contains(&term.to_lowercase()) {
+        let normalized_term = term.to_lowercase();
+        if normalized_file_name.contains(&normalized_term) {
             score += 2;
-            reasons.push(format!("「{}」が検索語句・タグ・役割・メモに一致", term));
+            reasons.push(format!("ファイル名「{file_name}」に「{term}」が一致"));
+        } else if searchable.contains(&normalized_term) {
+            score += 2;
+            reasons.push(format!("素材情報に「{term}」が一致"));
         }
     }
     (score > 0).then(|| Candidate {
@@ -178,7 +187,7 @@ mod tests {
             materials: vec![
                 CatalogMaterial {
                     id: "tekkaman".into(),
-                    source_path: "anime/01.mp4".into(),
+                    source_path: "anime/01-tekkaman.mp4".into(),
                     keywords: vec!["テッカマン".into()],
                     tags: vec!["登場".into()],
                     roles: vec!["導入".into()],
@@ -212,7 +221,21 @@ mod tests {
             ("slot-2".to_owned(), "surprised-reaction".to_owned()),
         ]);
         let manifest = manifest_from_plan(&plan, &selections).unwrap();
-        assert_eq!(manifest.entries[0].source_path, "anime/01.mp4");
+        assert_eq!(manifest.entries[0].source_path, "anime/01-tekkaman.mp4");
         assert_eq!(manifest.entries[1].material_id, "surprised-reaction");
+    }
+
+    #[test]
+    fn candidate_requires_matching_role_and_query() {
+        let plan = create_plan(&catalog(), "導入: t");
+        let candidate = &plan.slots[0].candidates[0];
+        assert_eq!(candidate.material_id, "tekkaman");
+        assert_eq!(
+            candidate.reasons,
+            ["ファイル名「01-tekkaman.mp4」に「t」が一致"]
+        );
+
+        let plan = create_plan(&catalog(), "つなぎ: t");
+        assert!(plan.slots[0].candidates.is_empty());
     }
 }
