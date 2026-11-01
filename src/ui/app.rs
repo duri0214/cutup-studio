@@ -399,73 +399,47 @@ impl StudioApp {
             ui.add_space(4.0);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        if theme::action_button(
-                            ui,
-                            theme::ActionIcon::New,
-                            "NEW",
-                            false,
-                            Vec2::new(106.0, 32.0),
-                        )
-                        .clicked()
-                        {
-                            self.create_catalog(ui.ctx());
-                        }
-                        ui.add_sized(
-                            Vec2::new(106.0, 22.0),
-                            egui::Label::new(
-                                RichText::new("基準フォルダを選ぶ")
-                                    .size(10.0)
-                                    .color(theme::MUTED),
-                            )
-                            .wrap(),
-                        );
-                    });
-                    ui.vertical(|ui| {
-                        if theme::action_button(
-                            ui,
-                            theme::ActionIcon::Open,
-                            "OPEN",
-                            false,
-                            Vec2::new(106.0, 32.0),
-                        )
-                        .clicked()
-                        {
-                            self.open_catalog(ui.ctx());
-                        }
-                        ui.add_sized(
-                            Vec2::new(106.0, 22.0),
-                            egui::Label::new(
-                                RichText::new("前の基準フォルダを選ぶ")
-                                    .size(10.0)
-                                    .color(theme::MUTED),
-                            )
-                            .wrap(),
-                        );
-                    });
-                    ui.vertical(|ui| {
-                        if theme::action_button(
-                            ui,
-                            theme::ActionIcon::Reset,
-                            "DEMO",
-                            self.is_demo_catalog(),
-                            Vec2::new(106.0, 32.0),
-                        )
-                        .clicked()
-                        {
-                            self.use_demo_catalog(ui.ctx());
-                        }
-                        ui.add_sized(
-                            Vec2::new(106.0, 22.0),
-                            egui::Label::new(
-                                RichText::new("サンプルで試す")
-                                    .size(10.0)
-                                    .color(theme::MUTED),
-                            )
-                            .wrap(),
-                        );
-                    });
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::New,
+                        "NEW",
+                        false,
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.create_catalog(ui.ctx());
+                    }
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::Open,
+                        "OPEN",
+                        false,
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.open_catalog(ui.ctx());
+                    }
+                    if theme::action_button(
+                        ui,
+                        theme::ActionIcon::Reset,
+                        "DEMO",
+                        self.is_demo_catalog(),
+                        Vec2::new(106.0, 32.0),
+                    )
+                    .clicked()
+                    {
+                        self.use_demo_catalog(ui.ctx());
+                    }
                 });
+                ui.label(
+                    RichText::new(
+                        "NEW: 新規作成 / OPEN: 既存を開く — どちらも基準フォルダを選びます。 DEMO: サンプルで試す。",
+                    )
+                    .size(10.0)
+                    .color(theme::MUTED),
+                );
                 if let Some(editor) = &mut self.editor {
                     let (total, missing) = editor.counts();
                     let rescan = if total == 0 {
