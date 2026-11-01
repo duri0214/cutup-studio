@@ -170,14 +170,15 @@ impl SqliteCatalog {
         let text_clause = if text.is_empty() {
             "1"
         } else if text.chars().count() >= 3 {
-            "m.id IN (SELECT rowid FROM material_fts WHERE material_fts MATCH ?1)"
+            "(m.id IN (SELECT rowid FROM material_fts WHERE material_fts MATCH ?1)
+              OR instr(lower(m.source_path),?5)>0)"
         } else {
-            "instr(m.search_text,?1)>0"
+            "instr(lower(m.source_path || ' ' || m.search_text),?5)>0"
         };
         let query = if text.chars().count() >= 3 {
             format!("\"{}\"", text.replace('"', "\"\""))
         } else {
-            text
+            text.clone()
         };
         let sql = format!(
             "SELECT m.id,m.source_path,m.metadata_json,m.available,
@@ -193,7 +194,8 @@ impl SqliteCatalog {
             query,
             filter.include_unavailable,
             filter.tag,
-            filter.role
+            filter.role,
+            text
         ])?;
         let mut materials = Vec::new();
         while let Some(row) = rows.next()? {
