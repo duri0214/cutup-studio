@@ -229,12 +229,18 @@ impl StudioApp {
     fn build_plan(&mut self) {
         let guide_text = self.guide_text();
         let Some(catalog) = &self.catalog else {
+            self.plan = None;
+            self.selections.clear();
+            self.active_slot = None;
             self.status = "OPEN で基準フォルダを開いてください。".into();
             return;
         };
         let plan = create_plan(catalog, &guide_text);
         if plan.slots.is_empty() {
-            self.status = "GUIDE に語句またはタグを入力してください。".into();
+            self.plan = None;
+            self.selections.clear();
+            self.active_slot = None;
+            self.status = "02 / COMPOSITION GUIDE に語句またはタグを入力してください。".into();
             return;
         }
         let candidate_count: usize = plan.slots.iter().map(|slot| slot.candidates.len()).sum();
@@ -275,7 +281,7 @@ impl StudioApp {
 
     fn save_manifest(&mut self) {
         let Some(plan) = &self.plan else {
-            self.status = "候補を生成してから保存してください。".into();
+            self.status = "02 / COMPOSITION GUIDE に語句またはタグを入力してください。".into();
             return;
         };
         let dialog = rfd::FileDialog::new()
@@ -317,12 +323,9 @@ impl StudioApp {
                 "01 の素材カタログを開いてください",
             )
         } else if self.plan.is_some() {
-            (theme::Signal::Ready, "GUIDE から候補を生成済みです")
+            (theme::Signal::Ready, "入力内容を候補へ反映済みです")
         } else {
-            (
-                theme::Signal::Attention,
-                "GUIDE を入力して候補を生成してください",
-            )
+            (theme::Signal::Attention, "語句またはタグを入力してください")
         }
     }
 
@@ -337,13 +340,19 @@ impl StudioApp {
             match plan.slots.get(active_index) {
                 Some(slot) if slot.candidates.is_empty() => (
                     theme::Signal::Error,
-                    "候補がありません。GUIDE の語句・タグ・役割を確認してください",
+                    "候補がありません。02 の語句・タグ・役割を確認してください",
                 ),
                 Some(_) => (theme::Signal::Ready, "候補を選択できます"),
-                None => (theme::Signal::Attention, "02 で GUIDE を生成してください"),
+                None => (
+                    theme::Signal::Attention,
+                    "02 / COMPOSITION GUIDE に語句またはタグを入力してください",
+                ),
             }
         } else {
-            (theme::Signal::Attention, "02 で GUIDE を生成してください")
+            (
+                theme::Signal::Attention,
+                "02 / COMPOSITION GUIDE に語句またはタグを入力してください",
+            )
         }
     }
 
@@ -478,8 +487,8 @@ impl StudioApp {
     fn show_guide_controls(&mut self, ui: &mut Ui) {
         let available_roles = self.available_roles();
         let (signal, status) = self.guide_status();
-        let can_show_candidates = self.catalog.is_some() && !self.guide_text().is_empty();
         let mut role_to_add = None;
+        let mut guide_changed = false;
         theme::panel().show(ui, |ui| {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(
@@ -510,13 +519,14 @@ impl StudioApp {
                     }
                     drag_stopped |= drag_response.drag_stopped();
                     theme::role_badge(ui, &guide_input.role, theme::ACCENT);
-                    ui.add(
+                    let response = ui.add(
                         egui::TextEdit::singleline(&mut guide_input.query)
                             .desired_width(330.0)
                             .min_size(Vec2::new(330.0, 28.0))
                             .margin(egui::Margin::symmetric(8, 4))
                             .hint_text(RichText::new("探したい語句・タグ").color(theme::MUTED)),
                     );
+                    guide_changed |= response.changed();
                     if can_remove
                         && theme::icon_button(ui, theme::ActionIcon::Delete, "このスロットを削除")
                             .clicked()
@@ -542,6 +552,7 @@ impl StudioApp {
             }
             if let Some(index) = remove_index {
                 self.guide_inputs.remove(index);
+                guide_changed = true;
             }
             if let Some(index) = drag_started {
                 self.dragged_guide_index = Some(index);
@@ -552,6 +563,7 @@ impl StudioApp {
                 {
                     let guide_input = self.guide_inputs.remove(from);
                     self.guide_inputs.insert(to, guide_input);
+                    guide_changed = true;
                 }
                 self.dragged_guide_index = None;
             }
@@ -561,19 +573,10 @@ impl StudioApp {
                     query: String::new(),
                 });
             }
-            if can_show_candidates
-                && theme::action_button(
-                    ui,
-                    theme::ActionIcon::Generate,
-                    "候補を表示",
-                    true,
-                    Vec2::new(160.0, 32.0),
-                )
-                .clicked()
-            {
-                self.build_plan();
-            }
         });
+        if guide_changed {
+            self.build_plan();
+        }
     }
 
     fn show_candidate_grid(&mut self, ui: &mut Ui) {
@@ -712,7 +715,10 @@ impl StudioApp {
                 ui.add_space(24.0);
                 ui.horizontal_centered(|ui| {
                     ui.label(
-                        RichText::new("GUIDE を生成すると構成が表示されます").color(theme::MUTED),
+                        RichText::new(
+                            "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
+                        )
+                        .color(theme::MUTED),
                     );
                 });
                 ui.add_space(24.0);
