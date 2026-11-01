@@ -95,12 +95,12 @@ impl CatalogEditor {
             return false;
         }
         ui.horizontal(|ui| {
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "1  素材を探す");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
             Self::tab_button(
                 ui,
                 &mut self.active_tab,
                 EditorTab::Metadata,
-                "2  素材の情報を登録",
+                "素材の情報を登録",
             );
         });
         ui.separator();
@@ -112,30 +112,29 @@ impl CatalogEditor {
 
     fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
         let selected = *active_tab == tab;
-        let response =
-            ui.add_sized(
-                [184.0, 32.0],
-                egui::Button::new(egui::RichText::new(label).size(12.0).strong().color(
-                    if selected {
-                        theme::ACCENT
-                    } else {
-                        theme::MUTED
-                    },
-                ))
-                .fill(if selected {
-                    theme::ACCENT.gamma_multiply(0.18)
-                } else {
-                    ui.visuals().widgets.inactive.bg_fill
-                })
-                .stroke(egui::Stroke::new(
-                    1.0_f32,
-                    if selected {
-                        theme::ACCENT
-                    } else {
-                        theme::BORDER
-                    },
-                )),
+        let (rect, response) =
+            ui.allocate_exact_size(egui::Vec2::new(184.0, 30.0), egui::Sense::click());
+        let text_color = if selected {
+            theme::ACCENT
+        } else {
+            theme::MUTED
+        };
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(12.0),
+            text_color,
+        );
+        if selected {
+            ui.painter().line_segment(
+                [
+                    egui::Pos2::new(rect.left() + 8.0, rect.bottom() - 1.0),
+                    egui::Pos2::new(rect.right() - 8.0, rect.bottom() - 1.0),
+                ],
+                egui::Stroke::new(2.0_f32, theme::ACCENT),
             );
+        }
         if response.clicked() {
             *active_tab = tab;
         }
