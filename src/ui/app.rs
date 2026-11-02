@@ -191,8 +191,8 @@ impl StudioApp {
                     "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて OPEN で基準フォルダを開き直してください。".into()
                 } else {
                     format!(
-                        "SCAN COMPLETE — 追加 {} / 変更 {} / 削除 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を選べます。",
-                        report.added, report.changed, report.removed
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 移動 {} / 削除 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を選べます。",
+                        report.added, report.changed, report.moved, report.removed
                     )
                 };
             }

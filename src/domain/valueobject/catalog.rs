@@ -43,6 +43,7 @@ pub struct StoredMaterial {
 pub struct ScanReport {
     pub added: usize,
     pub changed: usize,
+    pub moved: usize,
     pub removed: usize,
 }
 

@@ -101,22 +101,39 @@ impl SqliteCatalog {
         let mut report = ScanReport::default();
         let mut remaining = old;
         for file in files {
-            let previous = remaining.remove(&file.path);
-            match &previous {
-                None => report.added += 1,
-                Some(material) => {
-                    if material.fingerprint != file.fingerprint {
-                        report.changed += 1;
-                    }
+            if let Some(previous) = remaining.remove(&file.path) {
+                if previous.fingerprint != file.fingerprint {
+                    report.changed += 1;
                 }
+                tx.execute(
+                    "UPDATE materials SET fingerprint=?2,size_bytes=?3,
+                     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",
+                    params![previous.id, file.fingerprint, file.size],
+                )?;
+                continue;
             }
-            tx.execute(
-                "INSERT INTO materials(source_path,fingerprint,size_bytes) VALUES(?1,?2,?3)
-                 ON CONFLICT(source_path) DO UPDATE SET
-                 fingerprint=excluded.fingerprint,size_bytes=excluded.size_bytes,
-                 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-                params![file.path, file.fingerprint, file.size],
-            )?;
+            let matching_paths = remaining
+                .iter()
+                .filter(|(_, material)| material.fingerprint == file.fingerprint)
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            if let [previous_path] = matching_paths.as_slice() {
+                let previous = remaining
+                    .remove(previous_path)
+                    .expect("matching material must remain available for this scan");
+                tx.execute(
+                    "UPDATE materials SET source_path=?2,fingerprint=?3,size_bytes=?4,
+                     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",
+                    params![previous.id, file.path, file.fingerprint, file.size],
+                )?;
+                report.moved += 1;
+            } else {
+                tx.execute(
+                    "INSERT INTO materials(source_path,fingerprint,size_bytes) VALUES(?1,?2,?3)",
+                    params![file.path, file.fingerprint, file.size],
+                )?;
+                report.added += 1;
+            }
         }
         for material in remaining.values() {
             tx.execute(
@@ -333,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn rescan_discards_records_for_files_no_longer_in_materials_directory() {
+    fn rescan_keeps_metadata_for_an_unambiguous_rename_and_discards_deleted_file() {
         let temp = tempfile::tempdir().unwrap();
         let materials = temp.path().join("materials");
         std::fs::create_dir(&materials).unwrap();
@@ -349,6 +366,7 @@ mod tests {
             .save_metadata(
                 material_id,
                 &Metadata {
+                    keywords: vec!["テッカマン".into()],
                     tags: vec!["名前".into()],
                     ..Default::default()
                 },
@@ -357,22 +375,40 @@ mod tests {
 
         std::fs::rename(&original, &renamed).unwrap();
         let report = catalog.rescan().unwrap();
-        assert_eq!(report.added, 1);
-        assert_eq!(report.removed, 1);
+        assert_eq!(report.moved, 1);
+        assert_eq!(report.added, 0);
+        assert_eq!(report.removed, 0);
         assert_eq!(catalog.materials().unwrap().len(), 1);
         assert_eq!(
             catalog.materials().unwrap()[0].source_path,
             "materials/01-tekkaman-renamed.wav"
         );
+        assert_eq!(
+            catalog
+                .search(&SearchFilter {
+                    text: "テッカマン",
+                    ..Default::default()
+                })
+                .unwrap()[0]
+                .metadata
+                .tags,
+            vec!["名前"]
+        );
 
         std::fs::rename(&renamed, &original).unwrap();
         let report = catalog.rescan().unwrap();
-        assert_eq!(report.added, 1);
-        assert_eq!(report.removed, 1);
+        assert_eq!(report.moved, 1);
+        assert_eq!(report.added, 0);
+        assert_eq!(report.removed, 0);
         assert_eq!(catalog.materials().unwrap().len(), 1);
         assert_eq!(
             catalog.materials().unwrap()[0].source_path,
             "materials/01-tekkaman.wav"
         );
+
+        std::fs::remove_file(&original).unwrap();
+        let report = catalog.rescan().unwrap();
+        assert_eq!(report.removed, 1);
+        assert!(catalog.materials().unwrap().is_empty());
     }
 }
