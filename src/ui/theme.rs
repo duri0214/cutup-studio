@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontTweak, Frame,
-    Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    self, Align2, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
+    FontTweak, Frame, Pos2, Response, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(13, 17, 23);
@@ -16,11 +16,16 @@ pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
 
 #[derive(Clone, Copy)]
 pub enum ActionIcon {
+    New,
     Open,
-    Generate,
-    Save,
-    Reset,
     Delete,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    Error,
+    Attention,
+    Ready,
 }
 
 pub fn install(context: &Context) {
@@ -109,11 +114,39 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
         });
 }
 
-pub fn role_badge(ui: &mut Ui, text: &str, color: Color32) {
+pub fn traffic_light(ui: &mut Ui, active: Signal) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(8, 11, 15));
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0_f32, BORDER),
+        StrokeKind::Inside,
+    );
+    for (signal, color, offset) in [
+        (Signal::Error, RED, 8.0),
+        (Signal::Attention, AMBER, 19.0),
+        (Signal::Ready, ACCENT, 30.0),
+    ] {
+        let color = if signal == active {
+            color
+        } else {
+            color.gamma_multiply(0.18)
+        };
+        ui.painter()
+            .circle_filled(Pos2::new(rect.center().x, rect.top() + offset), 3.5, color);
+    }
+    response
+}
+
+pub fn role_label(ui: &mut Ui, text: &str) {
     ui.allocate_ui_with_layout(
         Vec2::new(48.0, 24.0),
         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| badge(ui, text, color),
+        |ui| {
+            ui.label(RichText::new(text).size(11.0).color(TEXT));
+        },
     );
 }
 
@@ -185,7 +218,53 @@ pub fn action_button(
     if primary && enabled {
         button = button.fill(ACCENT).stroke(Stroke::new(1.0_f32, ACCENT));
     }
-    ui.horizontal(|ui| ui.add_sized(size, button)).inner
+    ui.add_sized(size, button)
+}
+
+pub fn toggle_button(ui: &mut Ui, label: &str, on: bool, size: Vec2) -> Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let text_color = if on && enabled { ACCENT } else { MUTED };
+    ui.painter().text(
+        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(12.0),
+        text_color,
+    );
+    let track = egui::Rect::from_center_size(
+        Pos2::new(rect.right() - 24.0, rect.center().y),
+        Vec2::new(28.0, 16.0),
+    );
+    ui.painter().rect_filled(
+        track,
+        CornerRadius::same(8),
+        if on {
+            ACCENT
+        } else {
+            MUTED.gamma_multiply(0.45)
+        },
+    );
+    let knob_x = if on {
+        track.right() - 8.0
+    } else {
+        track.left() + 8.0
+    };
+    ui.painter().circle_filled(
+        Pos2::new(knob_x, track.center().y),
+        6.0,
+        if on { BACKGROUND } else { TEXT },
+    );
+    response.on_hover_text(if on {
+        "DEMO は有効です"
+    } else {
+        "DEMO を開く"
+    })
 }
 
 fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color: Color32) {
@@ -197,17 +276,11 @@ fn paint_action_icon(ui: &Ui, icon: ActionIcon, center: Pos2, size: Vec2, color:
 
 fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
     match icon {
+        ActionIcon::New => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/folder-plus.svg"
+        )),
         ActionIcon::Open => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/folder-open.svg"
-        )),
-        ActionIcon::Generate => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/wand-sparkles.svg"
-        )),
-        ActionIcon::Save => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/download.svg"
-        )),
-        ActionIcon::Reset => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/rotate-ccw.svg"
+            "../../assets/icons/lucide/file-open.svg"
         )),
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))
