@@ -15,7 +15,7 @@ use crate::{
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
-use super::catalog_editor::CatalogEditor;
+use super::catalog_editor::{CatalogEditor, PANEL_WIDTH};
 use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
@@ -681,19 +681,37 @@ impl StudioApp {
             }
         });
     }
+
+    fn show_composition_stage(&mut self, ui: &mut Ui, enabled: bool) -> bool {
+        let editor_is_open = self.editor.as_ref().is_some_and(|editor| editor.open);
+        let panel_width = ui
+            .ctx()
+            .animate_bool(ui.id().with("catalog-editor-panel"), editor_is_open)
+            * PANEL_WIDTH;
+        let mut changed = false;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            if panel_width > 0.0 {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(panel_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        if editor_is_open && let Some(editor) = &mut self.editor {
+                            changed = editor.show_panel(ui, enabled);
+                        }
+                    },
+                );
+                ui.add_space(theme::SPACE_SM);
+            }
+            self.show_stage(ui);
+        });
+        changed
+    }
 }
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_catalog_task();
         let busy = self.catalog_task.is_some();
-        if let Some(editor) = &mut self.editor
-            && editor.show(context, !busy)
-        {
-            self.reload_catalog();
-            self.status =
-                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
-        }
         let (status_state, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
@@ -713,7 +731,14 @@ impl eframe::App for StudioApp {
                         controls.add_space(theme::SPACE_SM);
                         controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
                         let stage = &mut columns[1];
-                        stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
+                        if stage
+                            .add_enabled_ui(!busy, |ui| self.show_composition_stage(ui, !busy))
+                            .inner
+                        {
+                            self.reload_catalog();
+                            self.status =
+                                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
+                        }
                     });
                 });
             });

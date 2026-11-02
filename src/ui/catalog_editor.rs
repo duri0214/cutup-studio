@@ -11,6 +11,8 @@ enum EditorTab {
     Metadata,
 }
 
+pub(super) const PANEL_WIDTH: f32 = 380.0;
+
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
     pub open: bool,
@@ -59,20 +61,22 @@ impl CatalogEditor {
         self.materials.len()
     }
 
-    pub fn show(&mut self, context: &egui::Context, enabled: bool) -> bool {
-        let mut open = self.open;
+    pub fn show_panel(&mut self, ui: &mut Ui, enabled: bool) -> bool {
         let mut changed = false;
-        egui::Window::new("素材の情報を登録")
-            .open(&mut open)
-            .default_width(740.0)
-            .default_height(520.0)
-            .vscroll(true)
-            .show(context, |ui| {
-                ui.add_enabled_ui(enabled, |ui| {
-                    changed = self.controls(ui);
+        theme::panel().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::caption_text("素材の情報を登録"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::button(ui, "閉じる", theme::ButtonKind::Normal).clicked() {
+                        self.open = false;
+                    }
                 });
             });
-        self.open = self.open && open;
+            ui.separator();
+            ui.add_enabled_ui(enabled, |ui| {
+                changed = self.controls(ui);
+            });
+        });
         changed
     }
 
@@ -345,7 +349,9 @@ mod tests {
         editor.save().unwrap();
         let context = egui::Context::default();
         let output = context.run(egui::RawInput::default(), |ctx| {
-            editor.show(ctx, true);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                editor.show_panel(ui, true);
+            });
         });
         assert!(!output.shapes.is_empty());
         drop(editor);
