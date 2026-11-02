@@ -180,7 +180,7 @@ impl SqliteCatalog {
             text.clone()
         };
         let sql = format!(
-                    "SELECT m.id,m.source_path,m.metadata_json,
+            "SELECT m.id,m.source_path,m.metadata_json,
                     (m.metadata_fingerprint IS NOT NULL AND m.metadata_fingerprint=m.fingerprint)
              FROM materials m WHERE {text_clause}
              AND (m.metadata_fingerprint IS NULL OR m.metadata_fingerprint=m.fingerprint)
@@ -323,6 +323,16 @@ mod tests {
         let path = temp.path().join("material-catalog.sqlite");
         let mut catalog = SqliteCatalog::create(&path, temp.path()).unwrap();
         catalog.rescan().unwrap();
+        let material_id = catalog.materials().unwrap()[0].id;
+        catalog
+            .save_metadata(
+                material_id,
+                &Metadata {
+                    tags: vec!["名前".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
 
         std::fs::rename(&original, &renamed).unwrap();
         let report = catalog.rescan().unwrap();
