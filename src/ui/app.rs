@@ -287,7 +287,7 @@ impl StudioApp {
         };
         let dialog = rfd::FileDialog::new()
             .set_file_name("composition-manifest.json")
-            .set_directory(&plan.material_root);
+            .set_directory(downloads_directory());
         let Some(path) = dialog.save_file() else {
             return;
         };
@@ -819,6 +819,13 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
+}
+
+fn downloads_directory() -> PathBuf {
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .map(|profile| profile.join("Downloads"))
+        .unwrap_or_else(|| PathBuf::from("Downloads"))
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
