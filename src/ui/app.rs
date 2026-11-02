@@ -688,11 +688,24 @@ impl StudioApp {
             .ctx()
             .animate_bool(ui.id().with("catalog-editor-panel"), editor_is_open)
             * PANEL_WIDTH;
+        let available_size = ui.available_size();
+        let panel_space = if panel_width > 0.0 {
+            panel_width + theme::SPACE_SM
+        } else {
+            0.0
+        };
+        let stage_width = (available_size.x - panel_space).max(0.0);
         let mut changed = false;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(stage_width, available_size.y),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| self.show_stage(ui),
+            );
             if panel_width > 0.0 {
+                ui.add_space(theme::SPACE_SM);
                 ui.allocate_ui_with_layout(
-                    Vec2::new(panel_width, ui.available_height()),
+                    Vec2::new(panel_width, available_size.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         if editor_is_open && let Some(editor) = &mut self.editor {
@@ -700,9 +713,7 @@ impl StudioApp {
                         }
                     },
                 );
-                ui.add_space(theme::SPACE_SM);
             }
-            self.show_stage(ui);
         });
         changed
     }
