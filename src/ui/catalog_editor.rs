@@ -26,7 +26,7 @@ pub(super) struct CatalogEditor {
     role_filter: String,
     active_tab: EditorTab,
     keep_open: bool,
-    message: String,
+    message: Option<(theme::State, String)>,
 }
 
 impl CatalogEditor {
@@ -49,7 +49,7 @@ impl CatalogEditor {
             role_filter: String::new(),
             active_tab: EditorTab::Search,
             keep_open: false,
-            message: String::new(),
+            message: None,
         };
         editor.load_selected();
         Ok(editor)
@@ -77,14 +77,22 @@ impl CatalogEditor {
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
-        ui.strong("仮組みでは、素材に入っている言葉・タグ・役割を手で登録します。");
-        ui.label("将来はローカルLLMがここを自動で埋めます。");
-        ui.label("開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。");
+        ui.label(
+            theme::body("仮組みでは、素材に入っている言葉・タグ・役割を手で登録します。").strong(),
+        );
+        ui.label(theme::body("将来はローカルLLMがここを自動で埋めます。"));
+        ui.label(theme::body(
+            "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
+        ));
         if self.materials.is_empty() {
             ui.separator();
-            ui.strong("まだ登録できる素材がありません。");
-            ui.label("1. 選んだ素材フォルダに動画または音声ファイルを入れます。");
-            ui.label("2. この画面を閉じ、01 / MATERIAL CATALOG の更新アイコンを押します。");
+            ui.label(theme::body("まだ登録できる素材がありません。").strong());
+            ui.label(theme::body(
+                "1. 選んだ素材フォルダに動画または音声ファイルを入れます。",
+            ));
+            ui.label(theme::body(
+                "2. この画面を閉じ、01 / MATERIAL CATALOG の更新アイコンを押します。",
+            ));
             return false;
         }
         ui.horizontal(|ui| {
@@ -96,7 +104,7 @@ impl CatalogEditor {
                 "素材の情報を登録",
             );
         });
-        ui.add_space(6.0);
+        ui.add_space(theme::SPACE_SM);
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
@@ -105,121 +113,83 @@ impl CatalogEditor {
 
     fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
         let selected = *active_tab == tab;
-        let (rect, response) =
-            ui.allocate_exact_size(egui::Vec2::new(184.0, 30.0), egui::Sense::click());
-        let text_color = if selected {
-            theme::ACCENT
-        } else {
-            theme::MUTED
-        };
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(12.0),
-            text_color,
-        );
-        if selected {
-            ui.painter().line_segment(
-                [
-                    egui::Pos2::new(rect.left() + 8.0, rect.bottom() - 1.0),
-                    egui::Pos2::new(rect.right() - 8.0, rect.bottom() - 1.0),
-                ],
-                egui::Stroke::new(2.0_f32, theme::ACCENT),
-            );
-        }
-        if response.clicked() {
+        if theme::tab(ui, label, selected, 184.0).clicked() {
             *active_tab = tab;
         }
     }
 
     fn search_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label("素材名や含まれる言葉を入力すると、候補を絞り込みます。選ぶと素材情報の登録画面を開きます。");
+        ui.label(theme::body(
+            "素材名や含まれる言葉を入力すると、候補を絞り込みます。選ぶと素材情報の登録画面を開きます。",
+        ));
         let mut filters_changed = false;
         ui.horizontal(|ui| {
-            ui.label("言葉・素材名");
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut self.query)
-                    .desired_width(280.0)
-                    .hint_text(egui::RichText::new("例: テッカマン").color(theme::MUTED)),
-            );
+            ui.label(theme::detail("言葉・素材名"));
+            let response = theme::text_input(ui, &mut self.query, "例: テッカマン", 280.0);
             filters_changed |= response.changed();
         });
         ui.collapsing("詳細検索（タグ・役割）", |ui| {
             ui.horizontal(|ui| {
-                ui.label("タグで絞り込み");
-                filters_changed |= ui
-                    .add(egui::TextEdit::singleline(&mut self.tag_filter).desired_width(130.0))
-                    .changed();
-                ui.label("役割で絞り込み");
-                filters_changed |= ui
-                    .add(egui::TextEdit::singleline(&mut self.role_filter).desired_width(130.0))
-                    .changed();
+                ui.label(theme::detail("タグで絞り込み"));
+                filters_changed |= theme::text_input(ui, &mut self.tag_filter, "", 130.0).changed();
+                ui.label(theme::detail("役割で絞り込み"));
+                filters_changed |=
+                    theme::text_input(ui, &mut self.role_filter, "", 130.0).changed();
             });
         });
         if filters_changed {
             match self.refresh() {
-                Ok(()) => self.message.clear(),
-                Err(error) => self.message = error.to_string(),
+                Ok(()) => self.message = None,
+                Err(error) => self.message = Some((theme::State::Error, error.to_string())),
             }
         }
         let has_filter = !self.query.trim().is_empty()
             || !self.tag_filter.trim().is_empty()
             || !self.role_filter.trim().is_empty();
         if !has_filter {
-            ui.label(egui::RichText::new("入力すると候補を表示します。").color(theme::MUTED));
+            ui.label(theme::body_muted("入力すると候補を表示します。"));
             return false;
         }
-        ui.label("要確認の素材も表示します。GUIDEの候補には使いません。");
+        ui.label(theme::detail_muted(
+            "要確認の素材も表示します。GUIDEの候補には使いません。",
+        ));
         let mut selection = None;
-        egui::Frame::new()
-            .fill(theme::BACKGROUND)
-            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-            .inner_margin(4)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("stored_materials")
-                    .max_height(220.0)
-                    .show(ui, |ui| {
-                        if self.stored_materials.is_empty() {
-                            ui.label(
-                                egui::RichText::new("一致する素材はありません。")
-                                    .color(theme::MUTED),
-                            );
-                        }
-                        for material in &self.stored_materials {
-                            let keywords = material.metadata.keywords.join(", ");
-                            let label = if keywords.is_empty() {
-                                format!(
-                                    "{} / {}",
-                                    material.source_path,
-                                    material.availability.label()
-                                )
-                            } else {
-                                format!(
-                                    "{} / {} / {}",
-                                    material.source_path,
-                                    material.availability.label(),
-                                    keywords
-                                )
-                            };
-                            if ui.selectable_label(false, label).clicked() {
-                                selection = Some(material.id);
-                            }
-                        }
-                    });
-            });
+        theme::suggestion_list(
+            ui,
+            "stored_materials",
+            theme::SUGGESTION_LIST_HEIGHT,
+            |ui| {
+                if self.stored_materials.is_empty() {
+                    ui.label(theme::body_muted("一致する素材はありません。"));
+                }
+                for material in &self.stored_materials {
+                    let keywords = material.metadata.keywords.join(", ");
+                    let label = if keywords.is_empty() {
+                        material.source_path.clone()
+                    } else {
+                        format!("{} / {keywords}", material.source_path)
+                    };
+                    let state = (material.availability == Availability::Stale)
+                        .then_some(("要確認", theme::State::Attention));
+                    if theme::suggestion_item(ui, &label, state).clicked() {
+                        selection = Some(material.id);
+                    }
+                }
+            },
+        );
         if let Some(id) = selection {
             self.material_id = Some(id);
             self.load_selected();
             self.active_tab = EditorTab::Metadata;
         }
-        ui.label(&self.message);
+        self.show_message(ui);
         false
     }
 
     fn metadata_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label("検索語句・タグ・役割は、この素材に保存する情報です。");
+        ui.label(theme::body(
+            "検索語句・タグ・役割は、この素材に保存する情報です。",
+        ));
         let selected = self.material_id;
         egui::ComboBox::from_id_salt("material")
             .width(640.0)
@@ -249,12 +219,14 @@ impl CatalogEditor {
                 ("制作上の役割", &mut self.roles),
                 ("メモ", &mut self.note),
             ] {
-                ui.label(label);
-                ui.add(egui::TextEdit::singleline(value).desired_width(510.0));
+                ui.label(theme::detail(label));
+                theme::text_input(ui, value, "", 510.0);
                 ui.end_row();
             }
         });
-        ui.label("複数の検索語句・タグ・役割はカンマ区切りです。");
+        ui.label(theme::detail_muted(
+            "複数の検索語句・タグ・役割はカンマ区切りです。",
+        ));
         let selected = self.material_id.is_some();
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
@@ -264,23 +236,29 @@ impl CatalogEditor {
             "保存して閉じる"
         };
         if ui
-            .add_enabled(selected, egui::Button::new(save_label))
+            .add_enabled_ui(selected, |ui| {
+                theme::button(ui, save_label, theme::ButtonKind::Primary)
+            })
+            .inner
             .clicked()
         {
             match self.save() {
                 Ok(()) => {
                     self.message = if self.keep_open {
-                        "素材の情報を保存しました。続けて別の素材を登録できます。".into()
+                        Some((
+                            theme::State::Ready,
+                            "素材の情報を保存しました。続けて別の素材を登録できます。".into(),
+                        ))
                     } else {
                         self.open = false;
-                        String::new()
+                        None
                     };
                     changed = true;
                 }
-                Err(error) => self.message = error.to_string(),
+                Err(error) => self.message = Some((theme::State::Error, error.to_string())),
             }
         }
-        ui.label(&self.message);
+        self.show_message(ui);
         changed
     }
 
@@ -299,7 +277,13 @@ impl CatalogEditor {
         self.tags = metadata.tags.join(", ");
         self.roles = metadata.roles.join(", ");
         self.note = metadata.note;
-        self.message.clear();
+        self.message = None;
+    }
+
+    fn show_message(&self, ui: &mut Ui) {
+        if let Some((state, message)) = &self.message {
+            theme::state_message(ui, *state, message);
+        }
     }
 
     fn save(&mut self) -> Result<(), CatalogError> {
