@@ -4,7 +4,7 @@ use std::{
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
-use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Ui, Vec2};
 
 use crate::{
     domain::valueobject::catalog::ScanReport,
@@ -279,96 +279,79 @@ impl StudioApp {
         guide_text_from_inputs(&self.guide_inputs)
     }
 
-    fn system_status(&self) -> (theme::Signal, Color32, &'static str) {
+    fn system_status(&self) -> (theme::State, &'static str) {
         if self.status.starts_with("CATALOG ERROR") || self.status.starts_with("CATALOG EXISTS") {
-            (theme::Signal::Error, theme::RED, "ERROR")
+            (theme::State::Error, "ERROR")
         } else if self.catalog_task.is_some() {
-            (theme::Signal::Attention, theme::AMBER, "SCANNING")
+            (theme::State::Attention, "SCANNING")
         } else if self.catalog.is_none() {
-            (theme::Signal::Attention, theme::AMBER, "NO CATALOG")
+            (theme::State::Attention, "NO CATALOG")
         } else if self.is_demo_catalog() {
-            (theme::Signal::Ready, theme::ACCENT, "DEMO")
+            (theme::State::Ready, "DEMO")
         } else {
-            (theme::Signal::Ready, theme::ACCENT, "READY")
+            (theme::State::Ready, "READY")
         }
     }
 
-    fn guide_status(&self) -> (theme::Signal, &'static str) {
+    fn guide_status(&self) -> (theme::State, &'static str) {
         if self.catalog.is_none() {
-            (
-                theme::Signal::Attention,
-                "01 の素材カタログを開いてください",
-            )
+            (theme::State::Attention, "01 の素材カタログを開いてください")
         } else if let Some(plan) = &self.plan {
             let active_index = self.active_slot.unwrap_or_default();
             match plan.slots.get(active_index) {
                 Some(slot) if slot.candidates.is_empty() => (
-                    theme::Signal::Error,
+                    theme::State::Error,
                     "候補がありません。02 の語句・タグ・役割を確認してください",
                 ),
-                Some(_) => (theme::Signal::Ready, "候補を選択できます"),
+                Some(_) => (theme::State::Ready, "候補を選択できます"),
                 None => (
-                    theme::Signal::Attention,
+                    theme::State::Attention,
                     "02 / COMPOSITION GUIDE に語句またはタグを入力してください",
                 ),
             }
         } else {
             (
-                theme::Signal::Attention,
+                theme::State::Attention,
                 "02 / COMPOSITION GUIDE に語句またはタグを入力してください",
             )
         }
     }
 
     fn show_header(&self, ui: &mut Ui) {
-        let (signal, _, _) = self.system_status();
+        let (signal, _) = self.system_status();
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
-            ui.label(
-                RichText::new("CUTUP")
-                    .size(25.0)
-                    .strong()
-                    .color(theme::ACCENT),
-            );
-            ui.label(RichText::new("STUDIO").size(25.0).strong());
+            ui.label(theme::brand_primary("CUTUP"));
+            ui.label(theme::brand_secondary("STUDIO"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.is_demo_catalog() && signal != theme::Signal::Error {
-                    theme::badge(ui, "DEMO", theme::ACCENT);
+                if self.is_demo_catalog() && signal != theme::State::Error {
+                    theme::ready_badge(ui, "DEMO");
                 }
-                ui.label(
-                    RichText::new(format!("SCHEMA V{SCHEMA_VERSION}"))
-                        .monospace()
-                        .size(10.0)
-                        .color(theme::MUTED),
-                );
+                ui.label(theme::caption_text(format!("SCHEMA V{SCHEMA_VERSION}")).monospace());
             });
         });
-        ui.label(
-            RichText::new("基準フォルダ内の素材から、構成の指示書を作る。")
-                .size(12.0)
-                .color(theme::MUTED),
-        );
+        ui.label(theme::body_muted(
+            "基準フォルダ内の素材から、構成の指示書を作る。",
+        ));
     }
 
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
-        let (signal, _, _) = self.system_status();
+        let (signal, _) = self.system_status();
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(
-                RichText::new(
+                theme::detail_muted(
                     "基準フォルダには materials/ と material-catalog.sqlite を置きます。",
-                )
-                .size(11.0)
-                .color(theme::MUTED),
+                ),
             );
-            ui.add_space(4.0);
+            ui.add_space(theme::SPACE_XS);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
                 ui.horizontal(|ui| {
                     if theme::action_button(
                         ui,
                         theme::ActionIcon::New,
                         "NEW",
-                        false,
+                        theme::ButtonKind::Normal,
                         Vec2::new(106.0, 32.0),
                     )
                     .clicked()
@@ -379,7 +362,7 @@ impl StudioApp {
                         ui,
                         theme::ActionIcon::Open,
                         "OPEN",
-                        false,
+                        theme::ButtonKind::Normal,
                         Vec2::new(106.0, 32.0),
                     )
                     .clicked()
@@ -398,18 +381,18 @@ impl StudioApp {
                     }
                 });
                 ui.label(
-                    RichText::new(
+                    theme::caption_text(
                         "NEW: 新規作成 / OPEN: 既存を開く — どちらも基準フォルダを選びます。 DEMO: サンプルで試す。",
-                    )
-                    .size(10.0)
-                    .color(theme::MUTED),
+                    ),
                 );
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
-                    ui.label(format!("素材ファイル: {total} 件"));
+                    ui.label(theme::body(format!("素材ファイル: {total} 件")));
                     if total > 0 {
                         ui.horizontal(|ui| {
-                            if ui.button("素材情報の編集").clicked() {
+                            if theme::button(ui, "素材情報の編集", theme::ButtonKind::Normal)
+                                .clicked()
+                            {
                                 editor.open = true;
                             }
                         });
@@ -419,19 +402,18 @@ impl StudioApp {
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!(
+                        theme::caption_text(format!(
                             "情報を登録済みの素材: {} 件",
                             catalog.materials.len()
-                        ))
-                        .size(10.0)
-                        .color(theme::MUTED),
+                        )),
                     );
                     if self.catalog_path.is_some() {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(format!("基準フォルダ: {}", catalog.material_root))
-                                    .size(10.0)
-                                    .color(theme::MUTED),
+                                theme::caption_text(format!(
+                                    "基準フォルダ: {}",
+                                    catalog.material_root
+                                )),
                             )
                             .truncate(),
                         );
@@ -439,9 +421,7 @@ impl StudioApp {
                 });
             } else {
                 ui.label(
-                    RichText::new("次: NEW / OPEN / DEMO のどれかを選びます。")
-                        .size(10.0)
-                        .color(theme::MUTED),
+                    theme::caption_text("次: NEW / OPEN / DEMO のどれかを選びます。"),
                 );
             }
         });
@@ -455,20 +435,18 @@ impl StudioApp {
         let mut reset_selections = false;
         theme::panel().show(ui, |ui| {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
-            ui.label(
-                RichText::new("役割を選び、探したい語句・タグを入力します。")
-                    .size(11.0)
-                    .color(theme::MUTED),
-            );
+            ui.label(theme::detail_muted(
+                "役割を選び、探したい語句・タグを入力します。",
+            ));
             ui.horizontal_wrapped(|ui| {
                 theme::caption(ui, "ADD SLOT");
                 for role in &available_roles {
-                    if theme::badge_button(ui, role, theme::ACCENT).clicked() {
+                    if theme::role_badge_button(ui, role).clicked() {
                         role_to_add = Some(role.clone());
                     }
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::SPACE_XS);
             let mut remove_index = None;
             let mut drag_started = None;
             let mut drag_stopped = false;
@@ -483,17 +461,17 @@ impl StudioApp {
                     }
                     drag_stopped |= drag_response.drag_stopped();
                     theme::role_label(ui, &guide_input.role);
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut guide_input.query)
-                            .desired_width(330.0)
-                            .min_size(Vec2::new(330.0, 28.0))
-                            .margin(egui::Margin::symmetric(8, 4))
-                            .hint_text(RichText::new("探したい語句・タグ").color(theme::MUTED)),
-                    );
+                    let response =
+                        theme::text_input(ui, &mut guide_input.query, "探したい語句・タグ", 330.0);
                     guide_changed |= response.changed();
                     if can_remove
-                        && theme::icon_button(ui, theme::ActionIcon::Delete, "このスロットを削除")
-                            .clicked()
+                        && theme::icon_button(
+                            ui,
+                            theme::ActionIcon::Delete,
+                            "このスロットを削除",
+                            theme::ButtonKind::Danger,
+                        )
+                        .clicked()
                     {
                         remove_index = Some(index);
                     }
@@ -508,10 +486,7 @@ impl StudioApp {
                     })
                 {
                     drop_target = Some(index);
-                    ui.painter().line_segment(
-                        [row.response.rect.left_top(), row.response.rect.right_top()],
-                        Stroke::new(2.0_f32, theme::ACCENT),
-                    );
+                    theme::drag_target_indicator(ui, row.response.rect);
                 }
             }
             if let Some(index) = remove_index {
@@ -545,9 +520,9 @@ impl StudioApp {
                 }
                 self.build_plan();
             }
-            ui.add_space(8.0);
+            ui.add_space(theme::SPACE_SM);
             ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(theme::SPACE_XS);
             self.show_candidates(ui);
         });
     }
@@ -569,9 +544,9 @@ impl StudioApp {
             .as_ref()
             .and_then(|plan| plan.slots.get(active_index));
         let Some(slot) = active_slot else {
-            ui.label(RichText::new("候補").size(11.0).strong());
+            ui.label(theme::detail("候補").strong());
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new("語句を入力すると候補が表示されます").color(theme::MUTED));
+                ui.label(theme::body_muted("語句を入力すると候補が表示されます"));
             });
             return;
         };
@@ -579,52 +554,60 @@ impl StudioApp {
         let candidates = slot.candidates.clone();
         let selected = self.selections.get(&slot_id).cloned();
         let mut next_active_index = active_index;
-        ui.label(RichText::new("候補").size(11.0).strong());
+        ui.label(theme::detail("候補").strong());
         if slot_tabs.len() > 1 {
             ui.horizontal_wrapped(|ui| {
                 for (index, label) in slot_tabs.iter().enumerate() {
-                    if ui.selectable_label(index == active_index, label).clicked() {
+                    if theme::tab(ui, label, index == active_index, 132.0).clicked() {
                         next_active_index = index;
                     }
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(theme::SPACE_SM);
         }
-        ui.label(
-            RichText::new(if slot_tabs.len() == 1 {
-                format!("役割: {} / 語句: {}", slot.slot.role, slot.slot.query)
-            } else {
-                format!("語句: {}", slot.slot.query)
-            })
-            .size(11.0)
-            .color(theme::MUTED),
-        );
-        ui.add_space(4.0);
+        ui.label(theme::detail_muted(if slot_tabs.len() == 1 {
+            format!("役割: {} / 語句: {}", slot.slot.role, slot.slot.query)
+        } else {
+            format!("語句: {}", slot.slot.query)
+        }));
+        ui.add_space(theme::SPACE_XS);
         if candidates.is_empty() {
-            ui.add_space(18.0);
-            ui.colored_label(
-                theme::RED,
+            ui.add_space(theme::SPACE_LG);
+            theme::state_message(
+                ui,
+                theme::State::Error,
                 "候補がありません。ガイドの語句・タグ・役割を確認してください。",
             );
         } else {
-            let card_width = ((ui.available_width() - 12.0) / 2.0).max(180.0);
+            let card_width = ((ui.available_width() - theme::SPACE_MD) / 2.0).max(180.0);
             let mut chosen = None;
             for row in candidates.chunks(2) {
                 ui.horizontal_top(|ui| {
                     for candidate in row {
-                        if candidate_card(
+                        let is_selected = selected
+                            .as_ref()
+                            .is_some_and(|current| current.material_id == candidate.material_id);
+                        let reasons = candidate.reasons.join(" / ");
+                        if theme::candidate_card(
                             ui,
-                            candidate,
-                            selected.as_ref().is_some_and(|current| {
-                                current.material_id == candidate.material_id
-                            }),
+                            &candidate.material_id,
+                            &candidate.source_path,
+                            &reasons,
+                            is_selected,
                             card_width,
-                        ) {
+                        )
+                        .on_hover_text(if is_selected {
+                            "クリックで選択を解除"
+                        } else {
+                            "クリックで選択"
+                        })
+                        .clicked()
+                        {
                             chosen = Some(candidate.clone());
                         }
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(theme::SPACE_XS);
             }
             if let Some(candidate) = chosen {
                 if selected
@@ -672,51 +655,29 @@ impl StudioApp {
                 ui.set_min_height(32.0);
                 theme::caption(ui, "03 / COMPOSITION");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    theme::badge(
-                        ui,
-                        &format!("選択 {} / {}", selected_count, entries.len()),
-                        theme::ACCENT,
-                    );
+                    theme::selection_count_badge(ui, selected_count, entries.len());
                 });
             });
             ui.label(
-                RichText::new(
+                theme::detail_muted(
                     "02で選んだ素材の順番を一覧で確認します。構成レシピの保存・復元は次の対応で行います。",
-                )
-                .size(11.0)
-                .color(theme::MUTED),
+                ),
             );
-            ui.add_space(8.0);
+            ui.add_space(theme::SPACE_SM);
             if entries.is_empty() {
-                ui.add_space(24.0);
+                ui.add_space(theme::SPACE_XL);
                 ui.horizontal_centered(|ui| {
-                    ui.label(
-                        RichText::new(
-                            "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
-                        )
-                        .color(theme::MUTED),
-                    );
+                    ui.label(theme::body_muted(
+                        "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
+                    ));
                 });
-                ui.add_space(24.0);
+                ui.add_space(theme::SPACE_XL);
             }
             for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
                 candidate.as_ref().map(|candidate| (order, role, candidate))
             }) {
-                Frame::new()
-                    .fill(Color32::from_rgb(18, 39, 43))
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .corner_radius(6)
-                    .inner_margin(10)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            theme::badge(ui, &format!("{:02}", order), theme::ACCENT);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&candidate.source_path).size(12.0).strong());
-                                ui.label(RichText::new(role).size(10.0).color(theme::MUTED));
-                            });
-                        });
-                    });
-                ui.add_space(3.0);
+                theme::selected_summary_item(ui, *order, &candidate.source_path, role);
+                ui.add_space(theme::SPACE_XXS);
             }
         });
     }
@@ -733,23 +694,23 @@ impl eframe::App for StudioApp {
             self.status =
                 "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
         }
-        let (_, status_color, status_label) = self.system_status();
+        let (status_state, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
-                theme::badge(ui, status_label, status_color);
-                ui.label(RichText::new(&self.status).size(11.0).color(theme::MUTED));
+                theme::state_badge(ui, status_label, status_state);
+                ui.label(theme::status_text(&self.status));
             });
         });
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(theme::BACKGROUND).inner_margin(20))
+            .frame(theme::content_frame())
             .show(context, |ui| {
                 self.show_header(ui);
-                ui.add_space(12.0);
+                ui.add_space(theme::SPACE_MD);
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.columns(2, |columns| {
                         let controls = &mut columns[0];
                         self.show_catalog_controls(controls);
-                        controls.add_space(8.0);
+                        controls.add_space(theme::SPACE_SM);
                         controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
                         let stage = &mut columns[1];
                         stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
@@ -759,7 +720,7 @@ impl eframe::App for StudioApp {
     }
 }
 
-fn section_header(ui: &mut Ui, title: &str, signal: theme::Signal, detail: &str) {
+fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
         theme::caption(ui, title);
@@ -780,64 +741,4 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
-}
-
-fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {
-    let response = Frame::new()
-        .fill(if selected {
-            Color32::from_rgb(24, 48, 49)
-        } else {
-            theme::PANEL
-        })
-        .stroke(Stroke::new(
-            1.0_f32,
-            if selected {
-                theme::ACCENT
-            } else {
-                theme::BORDER
-            },
-        ))
-        .corner_radius(8)
-        .inner_margin(10)
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(width - 24.0);
-                if selected {
-                    theme::badge(ui, "選択中", theme::ACCENT);
-                }
-                ui.add(
-                    egui::Label::new(RichText::new(&candidate.source_path).size(12.0).strong())
-                        .truncate(),
-                );
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(candidate.reasons.join(" / "))
-                            .size(10.0)
-                            .color(theme::ACCENT),
-                    )
-                    .truncate(),
-                );
-            });
-        })
-        .response;
-    let response = ui.interact(
-        response.rect,
-        ui.id().with(&candidate.material_id),
-        Sense::click(),
-    );
-    if selected || response.hovered() {
-        ui.painter().rect_stroke(
-            response.rect,
-            8.0,
-            Stroke::new(if selected { 2.0_f32 } else { 1.0_f32 }, theme::ACCENT),
-            egui::StrokeKind::Inside,
-        );
-    }
-    response
-        .on_hover_text(if selected {
-            "クリックで選択を解除"
-        } else {
-            "クリックで選択"
-        })
-        .clicked()
 }
