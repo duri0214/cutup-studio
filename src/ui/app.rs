@@ -388,15 +388,6 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
                     ui.label(theme::body(format!("素材ファイル: {total} 件")));
-                    if total > 0 {
-                        ui.horizontal(|ui| {
-                            if theme::button(ui, "素材情報の編集", theme::ButtonKind::Normal)
-                                .clicked()
-                            {
-                                editor.open = true;
-                            }
-                        });
-                    }
                 }
             });
             if let Some(catalog) = &self.catalog {
@@ -682,11 +673,10 @@ impl StudioApp {
         });
     }
 
-    fn show_composition_stage(&mut self, ui: &mut Ui, enabled: bool) -> bool {
-        let editor_is_open = self.editor.as_ref().is_some_and(|editor| editor.open);
+    fn show_catalog_registration(&mut self, ui: &mut Ui, enabled: bool) -> bool {
         let panel_width = ui
             .ctx()
-            .animate_bool(ui.id().with("catalog-editor-panel"), editor_is_open)
+            .animate_bool(ui.id().with("catalog-registration-panel"), true)
             * PANEL_WIDTH;
         let available_size = ui.available_size();
         let panel_space = if panel_width > 0.0 {
@@ -694,13 +684,13 @@ impl StudioApp {
         } else {
             0.0
         };
-        let stage_width = (available_size.x - panel_space).max(0.0);
+        let catalog_width = (available_size.x - panel_space).max(0.0);
         let mut changed = false;
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
-                Vec2::new(stage_width, available_size.y),
+                Vec2::new(catalog_width, available_size.y),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| self.show_stage(ui),
+                |ui| self.show_catalog_controls(ui),
             );
             if panel_width > 0.0 {
                 ui.add_space(theme::SPACE_SM);
@@ -708,7 +698,7 @@ impl StudioApp {
                     Vec2::new(panel_width, available_size.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        if editor_is_open && let Some(editor) = &mut self.editor {
+                        if let Some(editor) = &mut self.editor {
                             changed = editor.show_panel(ui, enabled);
                         }
                     },
@@ -736,21 +726,23 @@ impl eframe::App for StudioApp {
                 self.show_header(ui);
                 ui.add_space(theme::SPACE_MD);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.columns(2, |columns| {
-                        let controls = &mut columns[0];
-                        self.show_catalog_controls(controls);
-                        controls.add_space(theme::SPACE_SM);
-                        controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
-                        let stage = &mut columns[1];
-                        if stage
-                            .add_enabled_ui(!busy, |ui| self.show_composition_stage(ui, !busy))
-                            .inner
-                        {
+                    let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
+                    if registering {
+                        if self.show_catalog_registration(ui, !busy) {
                             self.reload_catalog();
                             self.status =
                                 "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
                         }
-                    });
+                    } else {
+                        ui.columns(2, |columns| {
+                            let controls = &mut columns[0];
+                            self.show_catalog_controls(controls);
+                            controls.add_space(theme::SPACE_SM);
+                            controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
+                            let stage = &mut columns[1];
+                            stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
+                        });
+                    }
                 });
             });
     }
