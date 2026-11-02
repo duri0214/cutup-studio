@@ -9,10 +9,9 @@ use eframe::egui::{self, Color32, Frame, RichText, Sense, Stroke, Ui, Vec2};
 use crate::{
     domain::valueobject::catalog::ScanReport,
     domain::{
-        service::{create_plan, manifest_from_plan},
+        service::create_plan,
         valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
     },
-    infra::catalog_file::save_manifest,
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
@@ -280,31 +279,8 @@ impl StudioApp {
         guide_text_from_inputs(&self.guide_inputs)
     }
 
-    fn save_manifest(&mut self) {
-        let Some(plan) = &self.plan else {
-            self.status = "02 / COMPOSITION GUIDE に語句またはタグを入力してください。".into();
-            return;
-        };
-        let dialog = rfd::FileDialog::new()
-            .set_file_name("composition-manifest.json")
-            .set_directory(downloads_directory());
-        let Some(path) = dialog.save_file() else {
-            return;
-        };
-        match manifest_from_plan(plan, &self.selections)
-            .map_err(|error| error.to_string())
-            .and_then(|manifest| save_manifest(&path, &manifest).map_err(|error| error.to_string()))
-        {
-            Ok(()) => self.status = format!("構成の指示書を書き出しました — {}", path.display()),
-            Err(error) => self.status = format!("構成の書き出しエラー — {error}"),
-        }
-    }
-
     fn system_status(&self) -> (theme::Signal, Color32, &'static str) {
-        if self.status.starts_with("CATALOG ERROR")
-            || self.status.starts_with("CATALOG EXISTS")
-            || self.status.starts_with("構成の書き出しエラー")
-        {
+        if self.status.starts_with("CATALOG ERROR") || self.status.starts_with("CATALOG EXISTS") {
             (theme::Signal::Error, theme::RED, "ERROR")
         } else if self.catalog_task.is_some() {
             (theme::Signal::Attention, theme::AMBER, "SCANNING")
@@ -691,7 +667,6 @@ impl StudioApp {
             .iter()
             .filter(|(_, _, candidate)| candidate.is_some())
             .count();
-        let composition_ready = !entries.is_empty() && selected_count == entries.len();
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
@@ -706,7 +681,7 @@ impl StudioApp {
             });
             ui.label(
                 RichText::new(
-                    "02で選んだ素材の順番を一覧で確認します。必要なときだけ構成の指示書を書き出せます。",
+                    "02で選んだ素材の順番を一覧で確認します。構成レシピの保存・復元は次の対応で行います。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -742,19 +717,6 @@ impl StudioApp {
                         });
                     });
                 ui.add_space(3.0);
-            }
-            if composition_ready {
-                ui.add_space(8.0);
-                let save_response = theme::action_button(
-                    ui,
-                    theme::ActionIcon::Save,
-                    "構成の指示書を書き出す",
-                    false,
-                    Vec2::new(250.0, 34.0),
-                );
-                if save_response.clicked() {
-                    self.save_manifest();
-                }
             }
         });
     }
@@ -818,13 +780,6 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
-}
-
-fn downloads_directory() -> PathBuf {
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .map(|profile| profile.join("Downloads"))
-        .unwrap_or_else(|| PathBuf::from("Downloads"))
 }
 
 fn candidate_card(ui: &mut Ui, candidate: &Candidate, selected: bool, width: f32) -> bool {

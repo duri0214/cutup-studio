@@ -18,7 +18,6 @@ pub const RED: Color32 = Color32::from_rgb(255, 100, 119);
 pub enum ActionIcon {
     New,
     Open,
-    Save,
     Delete,
 }
 
@@ -282,9 +281,6 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         )),
         ActionIcon::Open => egui::Image::new(egui::include_image!(
             "../../assets/icons/lucide/file-open.svg"
-        )),
-        ActionIcon::Save => egui::Image::new(egui::include_image!(
-            "../../assets/icons/lucide/download.svg"
         )),
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))

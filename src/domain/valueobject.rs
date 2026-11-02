@@ -13,8 +13,6 @@ pub enum DomainError {
     UnsafeSourcePath { id: String, path: String },
     #[error("素材 ID が重複しています: {0}")]
     DuplicateId(String),
-    #[error("スロット `{0}` の選択がありません")]
-    MissingSelection(String),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -98,29 +96,7 @@ pub struct SlotPlan {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Plan {
-    pub schema_version: u8,
-    pub guide_text: String,
-    pub material_root: String,
     pub slots: Vec<SlotPlan>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Manifest {
-    pub schema_version: u8,
-    pub guide_text: String,
-    pub material_root: String,
-    pub entries: Vec<ManifestEntry>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ManifestEntry {
-    pub order: usize,
-    pub slot_id: String,
-    pub role: String,
-    pub query: String,
-    pub material_id: String,
-    pub source_path: String,
-    pub selection_reason: Vec<String>,
 }
 
 #[cfg(test)]
