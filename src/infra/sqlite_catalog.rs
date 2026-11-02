@@ -170,9 +170,9 @@ impl SqliteCatalog {
             "1"
         } else if uses_fts {
             "(m.id IN (SELECT rowid FROM material_fts WHERE material_fts MATCH ?1)
-              OR instr(lower(substr(m.source_path,11)),?5)>0)"
+              OR instr(lower(substr(m.source_path,11)),?4)>0)"
         } else {
-            "instr(lower(substr(m.source_path,11) || ' ' || m.search_text),?5)>0"
+            "instr(lower(substr(m.source_path,11) || ' ' || m.search_text),?4)>0"
         };
         let query = if uses_fts {
             format!("\"{}\"", text.replace('"', "\"\""))
@@ -310,6 +310,27 @@ fn refresh_search(connection: &Connection, id: i64) -> Result<(), CatalogError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incremental_search_supports_short_filename_query() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("01-tekkaman.wav"), b"fixture").unwrap();
+        let path = temp.path().join("material-catalog.sqlite");
+        let mut catalog = SqliteCatalog::create(&path, temp.path()).unwrap();
+        catalog.rescan().unwrap();
+
+        let materials = catalog
+            .search(&SearchFilter {
+                text: "te",
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(materials.len(), 1);
+        assert_eq!(materials[0].source_path, "materials/01-tekkaman.wav");
+    }
 
     #[test]
     fn rescan_discards_records_for_files_no_longer_in_materials_directory() {
