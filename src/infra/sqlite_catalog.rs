@@ -405,6 +405,14 @@ mod tests {
             catalog.materials().unwrap()[0].source_path,
             "materials/01-tekkaman.wav"
         );
+        let materials = catalog
+            .search(&SearchFilter {
+                text: "t",
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(materials.len(), 1);
+        assert_eq!(materials[0].metadata.keywords, vec!["テッカマン"]);
 
         std::fs::remove_file(&original).unwrap();
         let report = catalog.rescan().unwrap();
