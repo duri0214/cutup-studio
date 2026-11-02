@@ -356,7 +356,6 @@ impl StudioApp {
             );
             ui.label(RichText::new("STUDIO").size(25.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                theme::badge(ui, "MANIFEST", theme::ACCENT);
                 if self.is_demo_catalog() && signal != theme::Signal::Error {
                     theme::badge(ui, "DEMO", theme::ACCENT);
                 }
