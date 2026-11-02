@@ -295,15 +295,15 @@ impl StudioApp {
             .map_err(|error| error.to_string())
             .and_then(|manifest| save_manifest(&path, &manifest).map_err(|error| error.to_string()))
         {
-            Ok(()) => self.status = format!("MANIFEST SAVED — {}", path.display()),
-            Err(error) => self.status = format!("MANIFEST ERROR — {error}"),
+            Ok(()) => self.status = format!("構成の指示書を書き出しました — {}", path.display()),
+            Err(error) => self.status = format!("構成の書き出しエラー — {error}"),
         }
     }
 
     fn system_status(&self) -> (theme::Signal, Color32, &'static str) {
         if self.status.starts_with("CATALOG ERROR")
             || self.status.starts_with("CATALOG EXISTS")
-            || self.status.starts_with("MANIFEST ERROR")
+            || self.status.starts_with("構成の書き出しエラー")
         {
             (theme::Signal::Error, theme::RED, "ERROR")
         } else if self.catalog_task.is_some() {
@@ -706,7 +706,7 @@ impl StudioApp {
             });
             ui.label(
                 RichText::new(
-                    "02で選んだ素材の順番を一覧で確認します。すべて選ぶと構成を保存できます。",
+                    "02で選んだ素材の順番を一覧で確認します。必要なときだけ構成の指示書を書き出せます。",
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -748,9 +748,9 @@ impl StudioApp {
                 let save_response = theme::action_button(
                     ui,
                     theme::ActionIcon::Save,
-                    "構成を保存",
-                    true,
-                    Vec2::new(210.0, 34.0),
+                    "構成の指示書を書き出す",
+                    false,
+                    Vec2::new(250.0, 34.0),
                 );
                 if save_response.clicked() {
                     self.save_manifest();
