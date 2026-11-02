@@ -32,10 +32,7 @@ pub(super) struct CatalogEditor {
 impl CatalogEditor {
     pub fn new(store: SqliteCatalog) -> Result<Self, CatalogError> {
         let materials = store.materials()?;
-        let stored_materials = store.search(&SearchFilter {
-            include_unavailable: true,
-            ..Default::default()
-        })?;
+        let stored_materials = store.search(&SearchFilter::default())?;
         let material_id = materials.first().map(|material| material.id);
         let mut editor = Self {
             store,
@@ -58,14 +55,8 @@ impl CatalogEditor {
         Ok(editor)
     }
 
-    pub fn counts(&self) -> (usize, usize) {
-        (
-            self.materials.len(),
-            self.materials
-                .iter()
-                .filter(|material| !material.available)
-                .count(),
-        )
+    pub fn count(&self) -> usize {
+        self.materials.len()
     }
 
     pub fn show(&mut self, context: &egui::Context, enabled: bool) -> bool {
@@ -179,9 +170,7 @@ impl CatalogEditor {
             ui.label(egui::RichText::new("入力すると候補を表示します。").color(theme::MUTED));
             return false;
         }
-        ui.label(
-            "利用不能・要確認の素材も表示します。GUIDEの候補には利用可能な素材だけを使います。",
-        );
+        ui.label("要確認の素材も表示します。GUIDEの候補には使いません。");
         let mut selection = None;
         egui::Frame::new()
             .fill(theme::BACKGROUND)
@@ -245,15 +234,7 @@ impl CatalogEditor {
                     ui.selectable_value(
                         &mut self.material_id,
                         Some(material.id),
-                        format!(
-                            "{}{}",
-                            material.source_path,
-                            if material.available {
-                                ""
-                            } else {
-                                "（利用不能）"
-                            }
-                        ),
+                        &material.source_path,
                     );
                 }
             });
@@ -274,10 +255,7 @@ impl CatalogEditor {
             }
         });
         ui.label("複数の検索語句・タグ・役割はカンマ区切りです。");
-        let available = self
-            .materials
-            .iter()
-            .any(|material| Some(material.id) == self.material_id && material.available);
+        let selected = self.material_id.is_some();
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
         let save_label = if self.keep_open {
@@ -286,7 +264,7 @@ impl CatalogEditor {
             "保存して閉じる"
         };
         if ui
-            .add_enabled(available, egui::Button::new(save_label))
+            .add_enabled(selected, egui::Button::new(save_label))
             .clicked()
         {
             match self.save() {
@@ -325,7 +303,7 @@ impl CatalogEditor {
     }
 
     fn save(&mut self) -> Result<(), CatalogError> {
-        let material_id = self.material_id.ok_or(CatalogError::Unavailable)?;
+        let material_id = self.material_id.ok_or(CatalogError::NoMaterialSelected)?;
         let metadata = Metadata {
             keywords: split(&self.keywords),
             tags: split(&self.tags),
@@ -344,7 +322,6 @@ impl CatalogEditor {
             text: &self.query,
             tag: nonempty(&self.tag_filter),
             role: nonempty(&self.role_filter),
-            include_unavailable: true,
         })?;
         Ok(())
     }

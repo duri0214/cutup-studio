@@ -182,7 +182,7 @@ impl StudioApp {
             .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
         {
             Ok((mut editor, path, report)) => {
-                let (total, _) = editor.counts();
+                let total = editor.count();
                 editor.open = total > 0;
                 self.editor = Some(editor);
                 self.catalog_path = Some(path);
@@ -191,13 +191,13 @@ impl StudioApp {
                     "SCAN COMPLETE — 素材ファイルが見つかりません。素材をフォルダへ入れて OPEN で基準フォルダを開き直してください。".into()
                 } else {
                     format!(
-                        "SCAN COMPLETE — 追加 {} / 変更 {} / 利用不能 {} / 復帰 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を選べます。",
-                        report.added, report.changed, report.missing, report.restored
+                        "SCAN COMPLETE — 追加 {} / 変更 {} / 削除 {}。素材の情報を登録後、メイン画面の 02 / COMPOSITION GUIDE で候補を選べます。",
+                        report.added, report.changed, report.removed
                     )
                 };
             }
             Err(error) => {
-                // A failed rescan must not leave an old plan available for export.
+                // A failed rescan must not leave an old plan active.
                 self.clear_active_catalog();
                 self.status = format!("CATALOG ERROR — {error}");
             }
@@ -405,8 +405,8 @@ impl StudioApp {
                     .color(theme::MUTED),
                 );
                 if let Some(editor) = &mut self.editor {
-                    let (total, missing) = editor.counts();
-                    ui.label(format!("素材ファイル: {total} 件 / 利用不能: {missing} 件"));
+                    let total = editor.count();
+                    ui.label(format!("素材ファイル: {total} 件"));
                     if total > 0 {
                         ui.horizontal(|ui| {
                             if ui.button("素材情報の編集").clicked() {

@@ -32,8 +32,8 @@ pub enum CatalogError {
     InvalidPath,
     #[error("走査中に素材が変更されました。OPENで基準フォルダを開き直してください")]
     FileChanged,
-    #[error("素材が利用できません。OPENで基準フォルダを開き直して確認してください")]
-    Unavailable,
+    #[error("素材を選択してください")]
+    NoMaterialSelected,
 }
 
 pub struct SqliteCatalog {
@@ -108,41 +108,38 @@ impl SqliteCatalog {
                     if material.fingerprint != file.fingerprint {
                         report.changed += 1;
                     }
-                    if !material.available {
-                        report.restored += 1;
-                    }
                 }
             }
             tx.execute(
                 "INSERT INTO materials(source_path,fingerprint,size_bytes) VALUES(?1,?2,?3)
                  ON CONFLICT(source_path) DO UPDATE SET
-                 fingerprint=excluded.fingerprint,size_bytes=excluded.size_bytes,available=1,
+                 fingerprint=excluded.fingerprint,size_bytes=excluded.size_bytes,
                  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
                 params![file.path, file.fingerprint, file.size],
             )?;
         }
-        for material in remaining.values().filter(|material| material.available) {
+        for material in remaining.values() {
             tx.execute(
-                "UPDATE materials SET available=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",
+                "DELETE FROM material_attributes WHERE material_id=?1",
                 [material.id],
             )?;
-            report.missing += 1;
+            tx.execute("DELETE FROM materials WHERE id=?1", [material.id])?;
+            report.removed += 1;
         }
         tx.commit()?;
         Ok(report)
     }
 
     pub fn materials(&self) -> Result<Vec<Material>, CatalogError> {
-        let mut statement = self.connection.prepare(
-            "SELECT id,source_path,fingerprint,available FROM materials ORDER BY source_path",
-        )?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT id,source_path,fingerprint FROM materials ORDER BY source_path")?;
         Ok(statement
             .query_map([], |row| {
                 Ok(Material {
                     id: row.get(0)?,
                     source_path: row.get(1)?,
                     fingerprint: row.get(2)?,
-                    available: row.get(3)?,
                 })
             })?
             .collect::<Result<_, _>>()?)
@@ -154,7 +151,7 @@ impl SqliteCatalog {
         metadata: &Metadata,
     ) -> Result<(), CatalogError> {
         let tx = self.connection.transaction()?;
-        let fingerprint = available_fingerprint(&tx, material_id)?;
+        let fingerprint = material_fingerprint(&tx, material_id)?;
         tx.execute(
             "UPDATE materials SET metadata_json=?2,metadata_fingerprint=?3,
              updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",
@@ -183,43 +180,29 @@ impl SqliteCatalog {
             text.clone()
         };
         let sql = format!(
-            "SELECT m.id,m.source_path,m.metadata_json,m.available,
+                    "SELECT m.id,m.source_path,m.metadata_json,
                     (m.metadata_fingerprint IS NOT NULL AND m.metadata_fingerprint=m.fingerprint)
              FROM materials m WHERE {text_clause}
-             AND (?2 OR (m.available=1 AND (m.metadata_fingerprint IS NULL OR m.metadata_fingerprint=m.fingerprint)))
-             AND (?3 IS NULL OR m.id IN (SELECT material_id FROM material_attributes WHERE kind='tag' AND value=?3))
-             AND (?4 IS NULL OR m.id IN (SELECT material_id FROM material_attributes WHERE kind='role' AND value=?4))
+             AND (m.metadata_fingerprint IS NULL OR m.metadata_fingerprint=m.fingerprint)
+             AND (?2 IS NULL OR m.id IN (SELECT material_id FROM material_attributes WHERE kind='tag' AND value=?2))
+             AND (?3 IS NULL OR m.id IN (SELECT material_id FROM material_attributes WHERE kind='role' AND value=?3))
              ORDER BY m.source_path,m.id"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let mut rows = if has_text {
-            statement.query(params![
-                query,
-                filter.include_unavailable,
-                filter.tag,
-                filter.role,
-                text
-            ])?
+            statement.query(params![query, filter.tag, filter.role, text])?
         } else {
-            statement.query(params![
-                query,
-                filter.include_unavailable,
-                filter.tag,
-                filter.role
-            ])?
+            statement.query(params![query, filter.tag, filter.role])?
         };
         let mut materials = Vec::new();
         while let Some(row) = rows.next()? {
             let metadata_json: String = row.get(2)?;
-            let available: bool = row.get(3)?;
-            let current: bool = row.get(4)?;
+            let current: bool = row.get(3)?;
             materials.push(StoredMaterial {
                 id: row.get(0)?,
                 source_path: row.get(1)?,
                 metadata: serde_json::from_str(&metadata_json)?,
-                availability: if !available {
-                    Availability::Missing
-                } else if !current && metadata_json != "{}" {
+                availability: if !current && metadata_json != "{}" {
                     Availability::Stale
                 } else {
                     Availability::Available
@@ -282,18 +265,15 @@ fn materials_directory(root: &Path) -> Result<PathBuf, CatalogError> {
     }
 }
 
-fn available_fingerprint(
-    connection: &Connection,
-    material_id: i64,
-) -> Result<String, CatalogError> {
+fn material_fingerprint(connection: &Connection, material_id: i64) -> Result<String, CatalogError> {
     connection
         .query_row(
-            "SELECT fingerprint FROM materials WHERE id=?1 AND available=1",
+            "SELECT fingerprint FROM materials WHERE id=?1",
             [material_id],
             |row| row.get(0),
         )
         .optional()?
-        .ok_or(CatalogError::Unavailable)
+        .ok_or(CatalogError::NoMaterialSelected)
 }
 
 fn refresh_search(connection: &Connection, id: i64) -> Result<(), CatalogError> {
@@ -325,4 +305,43 @@ fn refresh_search(connection: &Connection, id: i64) -> Result<(), CatalogError> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rescan_discards_records_for_files_no_longer_in_materials_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        let original = materials.join("01-tekkaman.wav");
+        let renamed = materials.join("01-tekkaman-renamed.wav");
+        std::fs::write(&original, b"fixture").unwrap();
+
+        let path = temp.path().join("material-catalog.sqlite");
+        let mut catalog = SqliteCatalog::create(&path, temp.path()).unwrap();
+        catalog.rescan().unwrap();
+
+        std::fs::rename(&original, &renamed).unwrap();
+        let report = catalog.rescan().unwrap();
+        assert_eq!(report.added, 1);
+        assert_eq!(report.removed, 1);
+        assert_eq!(catalog.materials().unwrap().len(), 1);
+        assert_eq!(
+            catalog.materials().unwrap()[0].source_path,
+            "materials/01-tekkaman-renamed.wav"
+        );
+
+        std::fs::rename(&renamed, &original).unwrap();
+        let report = catalog.rescan().unwrap();
+        assert_eq!(report.added, 1);
+        assert_eq!(report.removed, 1);
+        assert_eq!(catalog.materials().unwrap().len(), 1);
+        assert_eq!(
+            catalog.materials().unwrap()[0].source_path,
+            "materials/01-tekkaman.wav"
+        );
+    }
 }
