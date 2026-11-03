@@ -525,10 +525,34 @@ impl StudioApp {
                 }
                 self.build_plan();
             }
-            ui.add_space(theme::SPACE_SM);
-            ui.separator();
-            ui.add_space(theme::SPACE_XS);
+        });
+    }
+
+    fn show_candidate_pane(&mut self, ui: &mut Ui) {
+        theme::panel().show(ui, |ui| {
+            section_header(
+                ui,
+                "02 / CANDIDATES",
+                theme::State::Ready,
+                "02 / COMPOSITION GUIDE の候補",
+            );
             self.show_candidates(ui);
+        });
+    }
+
+    fn show_info_pane(&self, ui: &mut Ui) {
+        theme::panel().show(ui, |ui| {
+            theme::caption(ui, "INFO PANE");
+            ui.add_space(theme::SPACE_SM);
+            if self.catalog.is_some() {
+                ui.label(theme::body_muted(
+                    "02 / COMPOSITION GUIDE で役割と語句を入力すると、候補をここに表示します。",
+                ));
+            } else {
+                ui.label(theme::body_muted(
+                    "01 / MATERIAL CATALOG で NEW、OPEN、または DEMO を選んで素材を読み込みます。",
+                ));
+            }
         });
     }
 
@@ -701,14 +725,22 @@ impl eframe::App for StudioApp {
                 ui.label(theme::status_text(&self.status));
             });
         });
-        egui::SidePanel::right("catalog-registration")
+        egui::SidePanel::right("information-pane")
             .exact_width(PANEL_WIDTH)
             .resizable(false)
             .frame(theme::content_frame())
-            .show_animated(context, registering, |ui| {
-                if let Some(editor) = &mut self.editor {
-                    panel_event = editor.show_panel(ui, !busy);
-                }
+            .show(context, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if registering {
+                        if let Some(editor) = &mut self.editor {
+                            panel_event = editor.show_panel(ui, !busy);
+                        }
+                    } else if self.plan.is_some() {
+                        self.show_candidate_pane(ui);
+                    } else {
+                        self.show_info_pane(ui);
+                    }
+                });
             });
         match panel_event {
             PanelEvent::None => {}
