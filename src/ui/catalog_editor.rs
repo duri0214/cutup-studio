@@ -13,6 +13,13 @@ enum EditorTab {
 
 pub(super) const PANEL_WIDTH: f32 = 640.0;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PanelEvent {
+    None,
+    Saved,
+    ReturnToCatalog,
+}
+
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
     pub open: bool,
@@ -61,23 +68,28 @@ impl CatalogEditor {
         self.materials.len()
     }
 
-    pub fn show_panel(&mut self, ui: &mut Ui, enabled: bool) -> bool {
-        let mut changed = false;
+    pub fn show_panel(&mut self, ui: &mut Ui, enabled: bool) -> PanelEvent {
+        let mut event = PanelEvent::None;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(theme::caption_text("素材の情報を登録"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::button(ui, "閉じる", theme::ButtonKind::Normal).clicked() {
+                    if theme::button(ui, "01へ戻る", theme::ButtonKind::Normal).clicked() {
                         self.open = false;
+                        event = PanelEvent::ReturnToCatalog;
                     }
                 });
             });
             ui.separator();
-            ui.add_enabled_ui(enabled, |ui| {
-                changed = self.controls(ui);
-            });
+            if event == PanelEvent::None {
+                ui.add_enabled_ui(enabled, |ui| {
+                    if self.controls(ui) {
+                        event = PanelEvent::Saved;
+                    }
+                });
+            }
         });
-        changed
+        event
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
@@ -235,9 +247,9 @@ impl CatalogEditor {
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
         let save_label = if self.keep_open {
-            "素材の情報を保存"
+            "保存して続ける"
         } else {
-            "保存して閉じる"
+            "保存して次へ"
         };
         if ui
             .add_enabled_ui(selected, |ui| {

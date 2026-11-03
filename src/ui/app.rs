@@ -15,7 +15,7 @@ use crate::{
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
-use super::catalog_editor::{CatalogEditor, PANEL_WIDTH};
+use super::catalog_editor::{CatalogEditor, PANEL_WIDTH, PanelEvent};
 use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
@@ -681,7 +681,7 @@ impl StudioApp {
         });
     }
 
-    fn show_catalog_registration(&mut self, ui: &mut Ui, enabled: bool) -> bool {
+    fn show_catalog_registration(&mut self, ui: &mut Ui, enabled: bool) -> PanelEvent {
         let panel_width = ui
             .ctx()
             .animate_bool(ui.id().with("catalog-registration-panel"), true)
@@ -693,7 +693,7 @@ impl StudioApp {
             0.0
         };
         let catalog_width = (available_size.x - panel_space - theme::SPACE_SM).max(0.0);
-        let mut changed = false;
+        let mut event = PanelEvent::None;
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
                 Vec2::new(catalog_width, available_size.y),
@@ -707,13 +707,13 @@ impl StudioApp {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         if let Some(editor) = &mut self.editor {
-                            changed = editor.show_panel(ui, enabled);
+                            event = editor.show_panel(ui, enabled);
                         }
                     },
                 );
             }
         });
-        changed
+        event
     }
 }
 
@@ -736,10 +736,26 @@ impl eframe::App for StudioApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
                     if registering {
-                        if self.show_catalog_registration(ui, !busy) {
-                            self.reload_catalog();
-                            self.status =
-                                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
+                        match self.show_catalog_registration(ui, !busy) {
+                            PanelEvent::None => {}
+                            PanelEvent::ReturnToCatalog => {
+                                self.clear_active_catalog();
+                                self.status =
+                                    "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
+                                        .into();
+                            }
+                            PanelEvent::Saved => {
+                                self.reload_catalog();
+                                self.status = if self
+                                    .editor
+                                    .as_ref()
+                                    .is_some_and(|editor| editor.open)
+                                {
+                                    "CATALOG SAVED — 続けて素材の情報を登録できます。".into()
+                                } else {
+                                    "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into()
+                                };
+                            }
                         }
                     } else if self.catalog.is_some() {
                         ui.columns(2, |columns| {
