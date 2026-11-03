@@ -750,6 +750,8 @@ impl eframe::App for StudioApp {
                             let stage = &mut columns[1];
                             stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                         });
+                    } else {
+                        self.show_catalog_controls(ui);
                     }
                 });
             });
