@@ -692,7 +692,7 @@ impl StudioApp {
         } else {
             0.0
         };
-        let catalog_width = (available_size.x - panel_space).max(0.0);
+        let catalog_width = (available_size.x - panel_space - theme::SPACE_SM).max(0.0);
         let mut changed = false;
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(

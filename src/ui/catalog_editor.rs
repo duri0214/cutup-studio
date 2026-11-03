@@ -11,7 +11,7 @@ enum EditorTab {
     Metadata,
 }
 
-pub(super) const PANEL_WIDTH: f32 = 380.0;
+pub(super) const PANEL_WIDTH: f32 = 640.0;
 
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
