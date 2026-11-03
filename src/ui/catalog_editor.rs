@@ -11,6 +11,15 @@ enum EditorTab {
     Metadata,
 }
 
+pub(super) const PANEL_WIDTH: f32 = 640.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PanelEvent {
+    None,
+    Saved,
+    Closed,
+}
+
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
     pub open: bool,
@@ -59,21 +68,28 @@ impl CatalogEditor {
         self.materials.len()
     }
 
-    pub fn show(&mut self, context: &egui::Context, enabled: bool) -> bool {
-        let mut open = self.open;
-        let mut changed = false;
-        egui::Window::new("素材の情報を登録")
-            .open(&mut open)
-            .default_width(740.0)
-            .default_height(520.0)
-            .vscroll(true)
-            .show(context, |ui| {
-                ui.add_enabled_ui(enabled, |ui| {
-                    changed = self.controls(ui);
+    pub fn show_panel(&mut self, ui: &mut Ui, enabled: bool) -> PanelEvent {
+        let mut event = PanelEvent::None;
+        theme::panel().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::caption_text("素材の情報を登録"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::button(ui, "01へ戻る", theme::ButtonKind::Normal).clicked() {
+                        self.open = false;
+                        event = PanelEvent::Closed;
+                    }
                 });
             });
-        self.open = self.open && open;
-        changed
+            ui.separator();
+            if event == PanelEvent::None {
+                ui.add_enabled_ui(enabled, |ui| {
+                    if self.controls(ui) {
+                        event = PanelEvent::Saved;
+                    }
+                });
+            }
+        });
+        event
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
@@ -231,9 +247,9 @@ impl CatalogEditor {
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
         let save_label = if self.keep_open {
-            "素材の情報を保存"
+            "保存して続ける"
         } else {
-            "保存して閉じる"
+            "保存して次へ"
         };
         if ui
             .add_enabled_ui(selected, |ui| {
@@ -345,7 +361,9 @@ mod tests {
         editor.save().unwrap();
         let context = egui::Context::default();
         let output = context.run(egui::RawInput::default(), |ctx| {
-            editor.show(ctx, true);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                editor.show_panel(ui, true);
+            });
         });
         assert!(!output.shapes.is_empty());
         drop(editor);

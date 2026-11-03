@@ -15,7 +15,7 @@ use crate::{
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
 
-use super::catalog_editor::CatalogEditor;
+use super::catalog_editor::{CatalogEditor, PANEL_WIDTH, PanelEvent};
 use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
@@ -339,11 +339,9 @@ impl StudioApp {
         let (signal, _) = self.system_status();
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
-            ui.label(
-                theme::detail_muted(
-                    "基準フォルダには materials/ と material-catalog.sqlite を置きます。",
-                ),
-            );
+            ui.label(theme::detail_muted(
+                "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
+            ));
             ui.add_space(theme::SPACE_XS);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
                 ui.horizontal(|ui| {
@@ -377,52 +375,52 @@ impl StudioApp {
                     )
                     .clicked()
                     {
-                        self.use_demo_catalog(ui.ctx());
+                        if self.is_demo_catalog() {
+                            self.clear_active_catalog();
+                            self.catalog_task = None;
+                            self.status =
+                                "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
+                                    .into();
+                        } else {
+                            self.use_demo_catalog(ui.ctx());
+                        }
                     }
                 });
-                ui.label(
-                    theme::caption_text(
-                        "NEW: 新規作成 / OPEN: 既存を開く — どちらも基準フォルダを選びます。 DEMO: サンプルで試す。",
-                    ),
-                );
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
                     ui.label(theme::body(format!("素材ファイル: {total} 件")));
-                    if total > 0 {
-                        ui.horizontal(|ui| {
-                            if theme::button(ui, "素材情報の編集", theme::ButtonKind::Normal)
-                                .clicked()
-                            {
-                                editor.open = true;
-                            }
-                        });
-                    }
+                }
+                let can_open_editor = self
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.count() > 0 && !editor.open);
+                if ui
+                    .add_enabled_ui(can_open_editor, |ui| {
+                        theme::button(ui, "素材情報を編集 →", theme::ButtonKind::Primary)
+                    })
+                    .inner
+                    .clicked()
+                    && let Some(editor) = &mut self.editor
+                {
+                    editor.open = true;
                 }
             });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        theme::caption_text(format!(
-                            "情報を登録済みの素材: {} 件",
-                            catalog.materials.len()
-                        )),
-                    );
+                    ui.label(theme::caption_text(format!(
+                        "情報を登録済みの素材: {} 件",
+                        catalog.materials.len()
+                    )));
                     if self.catalog_path.is_some() {
                         ui.add(
-                            egui::Label::new(
-                                theme::caption_text(format!(
-                                    "基準フォルダ: {}",
-                                    catalog.material_root
-                                )),
-                            )
+                            egui::Label::new(theme::caption_text(format!(
+                                "基準フォルダ: {}",
+                                catalog.material_root
+                            )))
                             .truncate(),
                         );
                     }
                 });
-            } else {
-                ui.label(
-                    theme::caption_text("次: NEW / OPEN / DEMO のどれかを選びます。"),
-                );
             }
         });
     }
@@ -520,10 +518,28 @@ impl StudioApp {
                 }
                 self.build_plan();
             }
-            ui.add_space(theme::SPACE_SM);
-            ui.separator();
-            ui.add_space(theme::SPACE_XS);
+        });
+    }
+
+    fn show_candidate_pane(&mut self, ui: &mut Ui) {
+        theme::panel().show(ui, |ui| {
+            section_header(
+                ui,
+                "02 / CANDIDATES",
+                theme::State::Ready,
+                "02 / COMPOSITION GUIDE の候補",
+            );
             self.show_candidates(ui);
+        });
+    }
+
+    fn show_info_pane(&self, ui: &mut Ui) {
+        theme::panel().show(ui, |ui| {
+            theme::caption(ui, "INFO PANE");
+            ui.add_space(theme::SPACE_SM);
+            ui.label(theme::body_muted(
+                "素材の登録と、02 / COMPOSITION GUIDE の候補を表示します。",
+            ));
         });
     }
 
@@ -687,34 +703,60 @@ impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_catalog_task();
         let busy = self.catalog_task.is_some();
-        if let Some(editor) = &mut self.editor
-            && editor.show(context, !busy)
-        {
-            self.reload_catalog();
-            self.status =
-                "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
-        }
+        let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
+        let mut panel_event = PanelEvent::None;
         let (status_state, status_label) = self.system_status();
+        egui::TopBottomPanel::top("header")
+            .frame(theme::content_frame())
+            .show(context, |ui| self.show_header(ui));
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
                 ui.label(theme::status_text(&self.status));
             });
         });
+        egui::SidePanel::right("information-pane")
+            .exact_width(PANEL_WIDTH)
+            .resizable(false)
+            .frame(theme::content_frame())
+            .show(context, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if registering {
+                        if let Some(editor) = &mut self.editor {
+                            panel_event = editor.show_panel(ui, !busy);
+                        }
+                    } else if self.plan.is_some() {
+                        self.show_candidate_pane(ui);
+                    } else {
+                        self.show_info_pane(ui);
+                    }
+                });
+            });
+        match panel_event {
+            PanelEvent::None => {}
+            PanelEvent::Closed => {
+                self.status =
+                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材情報を編集 →」で右ペインを開けます。"
+                        .into();
+            }
+            PanelEvent::Saved => {
+                self.reload_catalog();
+                self.status = if self.editor.as_ref().is_some_and(|editor| editor.open) {
+                    "CATALOG SAVED — 続けて素材の情報を登録できます。".into()
+                } else {
+                    "CATALOG SAVED — 素材の情報を保存しました。02 / COMPOSITION GUIDE で候補を選んでください。".into()
+                };
+            }
+        }
         egui::CentralPanel::default()
             .frame(theme::content_frame())
             .show(context, |ui| {
-                self.show_header(ui);
-                ui.add_space(theme::SPACE_MD);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.columns(2, |columns| {
-                        let controls = &mut columns[0];
-                        self.show_catalog_controls(controls);
-                        controls.add_space(theme::SPACE_SM);
-                        controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
-                        let stage = &mut columns[1];
-                        stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
-                    });
+                    self.show_catalog_controls(ui);
+                    ui.add_space(theme::SPACE_SM);
+                    ui.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
+                    ui.add_space(theme::SPACE_SM);
+                    ui.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                 });
             });
     }
