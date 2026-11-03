@@ -20,6 +20,14 @@ use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
 
+fn physical_size(size_in_points: Vec2, pixels_per_point: f32) -> Vec2 {
+    size_in_points * pixels_per_point
+}
+
+fn logical_size_for_physical_size(physical_size: Vec2, pixels_per_point: f32) -> Vec2 {
+    physical_size / pixels_per_point
+}
+
 #[derive(Clone)]
 struct GuideInput {
     role: String,
@@ -38,6 +46,8 @@ pub struct StudioApp {
     active_slot: Option<usize>,
     dragged_guide_index: Option<usize>,
     status: String,
+    last_native_pixels_per_point: Option<f32>,
+    last_physical_window_size: Option<Vec2>,
 }
 
 impl StudioApp {
@@ -54,8 +64,40 @@ impl StudioApp {
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
+            last_native_pixels_per_point: None,
+            last_physical_window_size: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
+    }
+
+    fn preserve_physical_window_size(&mut self, context: &egui::Context) {
+        let Some(native_pixels_per_point) = context.native_pixels_per_point() else {
+            return;
+        };
+        let Some(inner_size) =
+            context.input(|input| input.viewport().inner_rect.map(|rect| rect.size()))
+        else {
+            return;
+        };
+        let pixels_per_point = context.pixels_per_point();
+
+        match (
+            self.last_native_pixels_per_point,
+            self.last_physical_window_size,
+        ) {
+            (Some(previous_native_pixels_per_point), Some(previous_physical_size))
+                if previous_native_pixels_per_point != native_pixels_per_point =>
+            {
+                context.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                    logical_size_for_physical_size(previous_physical_size, pixels_per_point),
+                ));
+            }
+            _ => {
+                self.last_physical_window_size = Some(physical_size(inner_size, pixels_per_point));
+            }
+        }
+
+        self.last_native_pixels_per_point = Some(native_pixels_per_point);
     }
 
     fn open_catalog(&mut self, context: &egui::Context) {
@@ -701,6 +743,7 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.preserve_physical_window_size(context);
         self.poll_catalog_task();
         let busy = self.catalog_task.is_some();
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
@@ -783,4 +826,26 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
 
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+
+    use super::{logical_size_for_physical_size, physical_size};
+
+    #[test]
+    fn logical_size_preserves_physical_size_when_dpi_changes() {
+        let main_display_pixels_per_point = 2.5;
+        let sub_display_pixels_per_point = 1.0;
+        let previous_physical_size =
+            physical_size(egui::vec2(512.0, 328.0), main_display_pixels_per_point);
+        let logical_size =
+            logical_size_for_physical_size(previous_physical_size, sub_display_pixels_per_point);
+
+        assert_eq!(
+            physical_size(logical_size, sub_display_pixels_per_point),
+            previous_physical_size
+        );
+    }
 }
