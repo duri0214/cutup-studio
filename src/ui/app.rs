@@ -424,10 +424,6 @@ impl StudioApp {
                         );
                     }
                 });
-            } else {
-                ui.label(
-                    theme::caption_text("次: NEW / OPEN / DEMO のどれかを選びます。"),
-                );
             }
         });
     }
@@ -544,15 +540,9 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             theme::caption(ui, "INFO PANE");
             ui.add_space(theme::SPACE_SM);
-            if self.catalog.is_some() {
-                ui.label(theme::body_muted(
-                    "02 / COMPOSITION GUIDE で役割と語句を入力すると、候補をここに表示します。",
-                ));
-            } else {
-                ui.label(theme::body_muted(
-                    "01 / MATERIAL CATALOG で NEW、OPEN、または DEMO を選んで素材を読み込みます。",
-                ));
-            }
+            ui.label(theme::body_muted(
+                "素材の登録と、02 / COMPOSITION GUIDE の候補を表示します。",
+            ));
         });
     }
 
@@ -719,6 +709,9 @@ impl eframe::App for StudioApp {
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
         let mut panel_event = PanelEvent::None;
         let (status_state, status_label) = self.system_status();
+        egui::TopBottomPanel::top("header")
+            .frame(theme::content_frame())
+            .show(context, |ui| self.show_header(ui));
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
@@ -761,8 +754,6 @@ impl eframe::App for StudioApp {
         egui::CentralPanel::default()
             .frame(theme::content_frame())
             .show(context, |ui| {
-                self.show_header(ui);
-                ui.add_space(theme::SPACE_MD);
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.show_catalog_controls(ui);
                     ui.add_space(theme::SPACE_SM);
