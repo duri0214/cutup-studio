@@ -339,11 +339,9 @@ impl StudioApp {
         let (signal, _) = self.system_status();
         theme::panel().show(ui, |ui| {
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
-            ui.label(
-                theme::detail_muted(
-                    "基準フォルダには materials/ と material-catalog.sqlite を置きます。",
-                ),
-            );
+            ui.label(theme::detail_muted(
+                "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
+            ));
             ui.add_space(theme::SPACE_XS);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
                 ui.horizontal(|ui| {
@@ -388,11 +386,6 @@ impl StudioApp {
                         }
                     }
                 });
-                ui.label(
-                    theme::caption_text(
-                        "NEW: 新規作成 / OPEN: 既存を開く — どちらも基準フォルダを選びます。 DEMO: サンプルで試す。",
-                    ),
-                );
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
                     ui.label(theme::body(format!("素材ファイル: {total} 件")));
@@ -406,20 +399,16 @@ impl StudioApp {
             });
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        theme::caption_text(format!(
-                            "情報を登録済みの素材: {} 件",
-                            catalog.materials.len()
-                        )),
-                    );
+                    ui.label(theme::caption_text(format!(
+                        "情報を登録済みの素材: {} 件",
+                        catalog.materials.len()
+                    )));
                     if self.catalog_path.is_some() {
                         ui.add(
-                            egui::Label::new(
-                                theme::caption_text(format!(
-                                    "基準フォルダ: {}",
-                                    catalog.material_root
-                                )),
-                            )
+                            egui::Label::new(theme::caption_text(format!(
+                                "基準フォルダ: {}",
+                                catalog.material_root
+                            )))
                             .truncate(),
                         );
                     }
