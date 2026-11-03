@@ -377,7 +377,15 @@ impl StudioApp {
                     )
                     .clicked()
                     {
-                        self.use_demo_catalog(ui.ctx());
+                        if self.is_demo_catalog() {
+                            self.clear_active_catalog();
+                            self.catalog_task = None;
+                            self.status =
+                                "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
+                                    .into();
+                        } else {
+                            self.use_demo_catalog(ui.ctx());
+                        }
                     }
                 });
                 ui.label(
@@ -733,7 +741,7 @@ impl eframe::App for StudioApp {
                             self.status =
                                 "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into();
                         }
-                    } else {
+                    } else if self.catalog.is_some() {
                         ui.columns(2, |columns| {
                             let controls = &mut columns[0];
                             self.show_catalog_controls(controls);
