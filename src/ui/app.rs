@@ -28,6 +28,26 @@ fn logical_size_for_physical_size(physical_size: Vec2, pixels_per_point: f32) ->
     physical_size / pixels_per_point
 }
 
+fn proportional_window_size(
+    previous_window_size: Vec2,
+    previous_monitor_size: Option<Vec2>,
+    current_monitor_size: Option<Vec2>,
+) -> Vec2 {
+    let (Some(previous_monitor_size), Some(current_monitor_size)) =
+        (previous_monitor_size, current_monitor_size)
+    else {
+        return previous_window_size;
+    };
+    if previous_monitor_size.x <= 0.0 || previous_monitor_size.y <= 0.0 {
+        return previous_window_size;
+    }
+
+    egui::vec2(
+        previous_window_size.x * current_monitor_size.x / previous_monitor_size.x,
+        previous_window_size.y * current_monitor_size.y / previous_monitor_size.y,
+    )
+}
+
 #[derive(Clone)]
 struct GuideInput {
     role: String,
@@ -48,6 +68,7 @@ pub struct StudioApp {
     status: String,
     last_native_pixels_per_point: Option<f32>,
     last_physical_window_size: Option<Vec2>,
+    last_physical_monitor_size: Option<Vec2>,
 }
 
 impl StudioApp {
@@ -66,20 +87,26 @@ impl StudioApp {
             dragged_guide_index: None,
             last_native_pixels_per_point: None,
             last_physical_window_size: None,
+            last_physical_monitor_size: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
 
-    fn preserve_physical_window_size(&mut self, context: &egui::Context) {
+    fn preserve_window_size_ratio(&mut self, context: &egui::Context) {
         let Some(native_pixels_per_point) = context.native_pixels_per_point() else {
             return;
         };
-        let Some(inner_size) =
-            context.input(|input| input.viewport().inner_rect.map(|rect| rect.size()))
-        else {
+        let (Some(inner_size), monitor_size) = context.input(|input| {
+            let viewport = input.viewport();
+            (
+                viewport.inner_rect.map(|rect| rect.size()),
+                viewport.monitor_size,
+            )
+        }) else {
             return;
         };
         let pixels_per_point = context.pixels_per_point();
+        let physical_monitor_size = monitor_size.map(|size| physical_size(size, pixels_per_point));
 
         match (
             self.last_native_pixels_per_point,
@@ -88,9 +115,15 @@ impl StudioApp {
             (Some(previous_native_pixels_per_point), Some(previous_physical_size))
                 if previous_native_pixels_per_point != native_pixels_per_point =>
             {
+                let desired_physical_size = proportional_window_size(
+                    previous_physical_size,
+                    self.last_physical_monitor_size,
+                    physical_monitor_size,
+                );
                 context.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                    logical_size_for_physical_size(previous_physical_size, pixels_per_point),
+                    logical_size_for_physical_size(desired_physical_size, pixels_per_point),
                 ));
+                self.last_physical_window_size = Some(desired_physical_size);
             }
             _ => {
                 self.last_physical_window_size = Some(physical_size(inner_size, pixels_per_point));
@@ -98,6 +131,7 @@ impl StudioApp {
         }
 
         self.last_native_pixels_per_point = Some(native_pixels_per_point);
+        self.last_physical_monitor_size = physical_monitor_size;
     }
 
     fn open_catalog(&mut self, context: &egui::Context) {
@@ -743,7 +777,7 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        self.preserve_physical_window_size(context);
+        self.preserve_window_size_ratio(context);
         self.poll_catalog_task();
         let busy = self.catalog_task.is_some();
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
@@ -832,20 +866,27 @@ fn demo_material_root() -> PathBuf {
 mod tests {
     use eframe::egui;
 
-    use super::{logical_size_for_physical_size, physical_size};
+    use super::{logical_size_for_physical_size, physical_size, proportional_window_size};
 
     #[test]
-    fn logical_size_preserves_physical_size_when_dpi_changes() {
+    fn logical_size_preserves_window_to_monitor_ratio_when_dpi_changes() {
         let main_display_pixels_per_point = 2.5;
         let sub_display_pixels_per_point = 1.0;
-        let previous_physical_size =
+        let previous_physical_window_size =
             physical_size(egui::vec2(512.0, 328.0), main_display_pixels_per_point);
+        let previous_physical_monitor_size = egui::vec2(1920.0, 1080.0);
+        let current_physical_monitor_size = egui::vec2(1536.0, 864.0);
+        let desired_physical_size = proportional_window_size(
+            previous_physical_window_size,
+            Some(previous_physical_monitor_size),
+            Some(current_physical_monitor_size),
+        );
         let logical_size =
-            logical_size_for_physical_size(previous_physical_size, sub_display_pixels_per_point);
+            logical_size_for_physical_size(desired_physical_size, sub_display_pixels_per_point);
 
         assert_eq!(
             physical_size(logical_size, sub_display_pixels_per_point),
-            previous_physical_size
+            egui::vec2(1024.0, 656.0)
         );
     }
 }
