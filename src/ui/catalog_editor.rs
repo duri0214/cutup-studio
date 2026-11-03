@@ -17,7 +17,7 @@ pub(super) const PANEL_WIDTH: f32 = 640.0;
 pub(super) enum PanelEvent {
     None,
     Saved,
-    ReturnToCatalog,
+    Closed,
 }
 
 pub(super) struct CatalogEditor {
@@ -76,7 +76,7 @@ impl CatalogEditor {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if theme::button(ui, "01へ戻る", theme::ButtonKind::Normal).clicked() {
                         self.open = false;
-                        event = PanelEvent::ReturnToCatalog;
+                        event = PanelEvent::Closed;
                     }
                 });
             });

@@ -396,6 +396,12 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
                     ui.label(theme::body(format!("素材ファイル: {total} 件")));
+                    if total > 0
+                        && !editor.open
+                        && theme::button(ui, "素材情報を登録", theme::ButtonKind::Primary).clicked()
+                    {
+                        editor.open = true;
+                    }
                 }
             });
             if let Some(catalog) = &self.catalog {
@@ -680,47 +686,14 @@ impl StudioApp {
             }
         });
     }
-
-    fn show_catalog_registration(&mut self, ui: &mut Ui, enabled: bool) -> PanelEvent {
-        let panel_width = ui
-            .ctx()
-            .animate_bool(ui.id().with("catalog-registration-panel"), true)
-            * PANEL_WIDTH;
-        let available_size = ui.available_size();
-        let panel_space = if panel_width > 0.0 {
-            panel_width + theme::SPACE_SM
-        } else {
-            0.0
-        };
-        let catalog_width = (available_size.x - panel_space - theme::SPACE_SM).max(0.0);
-        let mut event = PanelEvent::None;
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(
-                Vec2::new(catalog_width, available_size.y),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| self.show_catalog_controls(ui),
-            );
-            if panel_width > 0.0 {
-                ui.add_space(theme::SPACE_SM);
-                ui.allocate_ui_with_layout(
-                    Vec2::new(panel_width, available_size.y),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        if let Some(editor) = &mut self.editor {
-                            event = editor.show_panel(ui, enabled);
-                        }
-                    },
-                );
-            }
-        });
-        event
-    }
 }
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_catalog_task();
         let busy = self.catalog_task.is_some();
+        let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
+        let mut panel_event = PanelEvent::None;
         let (status_state, status_label) = self.system_status();
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
@@ -728,47 +701,42 @@ impl eframe::App for StudioApp {
                 ui.label(theme::status_text(&self.status));
             });
         });
+        egui::SidePanel::right("catalog-registration")
+            .exact_width(PANEL_WIDTH)
+            .resizable(false)
+            .frame(theme::content_frame())
+            .show_animated(context, registering, |ui| {
+                if let Some(editor) = &mut self.editor {
+                    panel_event = editor.show_panel(ui, !busy);
+                }
+            });
+        match panel_event {
+            PanelEvent::None => {}
+            PanelEvent::Closed => {
+                self.status =
+                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG から素材情報を登録できます。"
+                        .into();
+            }
+            PanelEvent::Saved => {
+                self.reload_catalog();
+                self.status = if self.editor.as_ref().is_some_and(|editor| editor.open) {
+                    "CATALOG SAVED — 続けて素材の情報を登録できます。".into()
+                } else {
+                    "CATALOG SAVED — 素材の情報を保存しました。02 / COMPOSITION GUIDE で候補を選んでください。".into()
+                };
+            }
+        }
         egui::CentralPanel::default()
             .frame(theme::content_frame())
             .show(context, |ui| {
                 self.show_header(ui);
                 ui.add_space(theme::SPACE_MD);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
-                    if registering {
-                        match self.show_catalog_registration(ui, !busy) {
-                            PanelEvent::None => {}
-                            PanelEvent::ReturnToCatalog => {
-                                self.clear_active_catalog();
-                                self.status =
-                                    "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
-                                        .into();
-                            }
-                            PanelEvent::Saved => {
-                                self.reload_catalog();
-                                self.status = if self
-                                    .editor
-                                    .as_ref()
-                                    .is_some_and(|editor| editor.open)
-                                {
-                                    "CATALOG SAVED — 続けて素材の情報を登録できます。".into()
-                                } else {
-                                    "CATALOG SAVED — 素材の情報を保存しました。メイン画面の 02 / COMPOSITION GUIDE で候補を選んでください。".into()
-                                };
-                            }
-                        }
-                    } else if self.catalog.is_some() {
-                        ui.columns(2, |columns| {
-                            let controls = &mut columns[0];
-                            self.show_catalog_controls(controls);
-                            controls.add_space(theme::SPACE_SM);
-                            controls.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
-                            let stage = &mut columns[1];
-                            stage.add_enabled_ui(!busy, |ui| self.show_stage(ui));
-                        });
-                    } else {
-                        self.show_catalog_controls(ui);
-                    }
+                    self.show_catalog_controls(ui);
+                    ui.add_space(theme::SPACE_SM);
+                    ui.add_enabled_ui(!busy, |ui| self.show_guide_controls(ui));
+                    ui.add_space(theme::SPACE_SM);
+                    ui.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                 });
             });
     }
