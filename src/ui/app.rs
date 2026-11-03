@@ -389,12 +389,20 @@ impl StudioApp {
                 if let Some(editor) = &mut self.editor {
                     let total = editor.count();
                     ui.label(theme::body(format!("素材ファイル: {total} 件")));
-                    if total > 0
-                        && !editor.open
-                        && theme::button(ui, "素材情報を登録", theme::ButtonKind::Primary).clicked()
-                    {
-                        editor.open = true;
-                    }
+                }
+                let can_open_editor = self
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.count() > 0 && !editor.open);
+                if ui
+                    .add_enabled_ui(can_open_editor, |ui| {
+                        theme::button(ui, "素材情報を編集 →", theme::ButtonKind::Primary)
+                    })
+                    .inner
+                    .clicked()
+                    && let Some(editor) = &mut self.editor
+                {
+                    editor.open = true;
                 }
             });
             if let Some(catalog) = &self.catalog {
@@ -728,7 +736,7 @@ impl eframe::App for StudioApp {
             PanelEvent::None => {}
             PanelEvent::Closed => {
                 self.status =
-                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG から素材情報を登録できます。"
+                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材情報を編集 →」で右ペインを開けます。"
                         .into();
             }
             PanelEvent::Saved => {
