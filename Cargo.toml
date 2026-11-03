@@ -6,7 +6,7 @@ description = "A local, metadata-first sketchpad for cut-up video compositions"
 license = "MIT"
 
 [dependencies]
-eframe = { version = "0.32", default-features = true }
+eframe = { version = "0.32", default-features = true, features = ["wgpu"] }
 egui_extras = { version = "0.32", features = ["svg"] }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
