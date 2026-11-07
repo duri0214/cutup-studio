@@ -249,7 +249,7 @@ impl CatalogEditor {
         let save_label = if self.keep_open {
             "保存して続ける"
         } else {
-            "保存して次へ"
+            "保存して閉じる"
         };
         if ui
             .add_enabled_ui(selected, |ui| {
