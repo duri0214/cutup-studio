@@ -10,7 +10,10 @@ use crate::{
     domain::valueobject::catalog::ScanReport,
     domain::{
         service::create_plan,
-        valueobject::{Candidate, Catalog, Plan, SCHEMA_VERSION},
+        valueobject::{
+            Candidate, Catalog, CompositionRecipe, CompositionRecipeSlot, Plan, RecipeSelection,
+            SCHEMA_VERSION,
+        },
     },
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
 };
@@ -251,6 +254,112 @@ impl StudioApp {
             candidate_count
         );
         self.plan = Some(plan);
+    }
+
+    fn current_recipe(&self) -> Option<CompositionRecipe> {
+        let plan = self.plan.as_ref()?;
+        Some(CompositionRecipe {
+            slots: plan
+                .slots
+                .iter()
+                .map(|slot| CompositionRecipeSlot {
+                    slot: slot.slot.clone(),
+                    selection: self.selections.get(&slot.slot.id).map(|candidate| {
+                        RecipeSelection {
+                            material_id: candidate.material_id.clone(),
+                            score: candidate.score,
+                            reasons: candidate.reasons.clone(),
+                        }
+                    }),
+                })
+                .collect(),
+        })
+    }
+
+    fn save_recipe(&mut self) {
+        let Some(recipe) = self.current_recipe() else {
+            self.status = "構成設定を保存するには、02で語句を入力してください。".into();
+            return;
+        };
+        let Some(editor) = &mut self.editor else {
+            self.status = "構成設定を保存するには、基準フォルダを開いてください。".into();
+            return;
+        };
+        match editor.store.save_recipe(&recipe) {
+            Ok(()) => {
+                self.status =
+                    "構成設定を保存しました。必要なときに03の「読み込み」で復元できます。".into();
+            }
+            Err(error) => self.status = format!("RECIPE ERROR — 構成設定を保存できません: {error}"),
+        }
+    }
+
+    fn load_recipe(&mut self) {
+        let result = self
+            .editor
+            .as_ref()
+            .map(|editor| editor.store.load_recipe());
+        let Some(result) = result else {
+            self.status = "構成設定を読み込むには、基準フォルダを開いてください。".into();
+            return;
+        };
+        match result {
+            Ok(Some(recipe)) => {
+                self.guide_inputs = recipe
+                    .slots
+                    .iter()
+                    .map(|recipe_slot| GuideInput {
+                        role: recipe_slot.slot.role.clone(),
+                        query: recipe_slot.slot.query.clone(),
+                    })
+                    .collect();
+                self.build_plan();
+                self.selections.clear();
+                let mut restored_count = 0;
+                let mut unavailable_count = 0;
+                if let Some(plan) = &self.plan {
+                    for recipe_slot in recipe.slots {
+                        let Some(selection) = recipe_slot.selection else {
+                            continue;
+                        };
+                        let Some(current) = plan
+                            .slots
+                            .iter()
+                            .find(|slot| slot.slot.order == recipe_slot.slot.order)
+                            .and_then(|slot| {
+                                slot.candidates.iter().find(|candidate| {
+                                    candidate.material_id == selection.material_id
+                                })
+                            })
+                        else {
+                            unavailable_count += 1;
+                            continue;
+                        };
+                        let mut candidate = current.clone();
+                        candidate.score = selection.score;
+                        candidate.reasons = selection.reasons;
+                        self.selections
+                            .insert(recipe_slot.slot.id.clone(), candidate);
+                        restored_count += 1;
+                    }
+                }
+                self.active_slot = Some(0);
+                self.status = if unavailable_count == 0 {
+                    format!(
+                        "構成設定を読み込みました。{restored_count}件の選択を03で確認できます。"
+                    )
+                } else {
+                    format!(
+                        "構成設定を読み込みました。{restored_count}件を復元、{unavailable_count}件は現在の候補にありません。"
+                    )
+                };
+            }
+            Ok(None) => {
+                self.status =
+                    "保存済みの構成設定がありません。02で構成を作って保存してください。".into();
+            }
+            Err(error) => self.status = format!("RECIPE ERROR — 構成設定を読み込めません: {error}"),
+        }
     }
 
     fn available_roles(&self) -> Vec<String> {
@@ -666,19 +775,39 @@ impl StudioApp {
             .iter()
             .filter(|(_, _, candidate)| candidate.is_some())
             .count();
+        let mut save_requested = false;
+        let mut load_requested = false;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
                 theme::caption(ui, "03 / COMPOSITION");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_load = self.editor.is_some();
+                    let can_save = self.plan.is_some() && self.editor.is_some();
+                    if ui
+                        .add_enabled_ui(can_load, |ui| {
+                            theme::button(ui, "読み込み", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        load_requested = true;
+                    }
+                    if ui
+                        .add_enabled_ui(can_save, |ui| {
+                            theme::button(ui, "保存", theme::ButtonKind::Primary)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        save_requested = true;
+                    }
                     theme::selection_count_badge(ui, selected_count, entries.len());
                 });
             });
-            ui.label(
-                theme::detail_muted(
-                    "02で選んだ素材の順番を一覧で確認します。構成レシピの保存・復元は次の対応で行います。",
-                ),
-            );
+            ui.label(theme::detail_muted(
+                "02で選んだ素材の順番を確認します。保存した構成設定は必要なときに読み込めます。",
+            ));
             ui.add_space(theme::SPACE_SM);
             if entries.is_empty() {
                 ui.add_space(theme::SPACE_XL);
@@ -696,6 +825,12 @@ impl StudioApp {
                 ui.add_space(theme::SPACE_XXS);
             }
         });
+        if save_requested {
+            self.save_recipe();
+        }
+        if load_requested {
+            self.load_recipe();
+        }
     }
 }
 

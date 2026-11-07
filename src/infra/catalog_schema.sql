@@ -1,5 +1,5 @@
 PRAGMA application_id = 1129665603;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 CREATE TABLE catalog (id INTEGER PRIMARY KEY CHECK(id=1), material_root TEXT NOT NULL);
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,
@@ -20,6 +20,20 @@ CREATE TABLE material_attributes (
     PRIMARY KEY(material_id,kind,value)
 );
 CREATE INDEX attributes_filter ON material_attributes(kind,value,material_id);
+CREATE TABLE composition_recipe (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE composition_recipe_slots (
+    recipe_id INTEGER NOT NULL REFERENCES composition_recipe(id) ON DELETE CASCADE,
+    slot_order INTEGER NOT NULL CHECK(slot_order>0),
+    role TEXT NOT NULL,
+    query TEXT NOT NULL,
+    selected_material_id TEXT,
+    selected_score INTEGER,
+    selected_reasons_json TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY(recipe_id,slot_order)
+);
 CREATE VIRTUAL TABLE material_fts USING fts5(search_text, content='materials', content_rowid='id', tokenize='trigram');
 CREATE TRIGGER materials_insert AFTER INSERT ON materials BEGIN
     INSERT INTO material_fts(rowid,search_text) VALUES(new.id,new.search_text);

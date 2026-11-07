@@ -99,6 +99,24 @@ pub struct Plan {
     pub slots: Vec<SlotPlan>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompositionRecipe {
+    pub slots: Vec<CompositionRecipeSlot>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompositionRecipeSlot {
+    pub slot: GuideSlot,
+    pub selection: Option<RecipeSelection>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecipeSelection {
+    pub material_id: String,
+    pub score: u32,
+    pub reasons: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
