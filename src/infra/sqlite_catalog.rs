@@ -1,5 +1,8 @@
 use super::material_scan;
-use crate::domain::valueobject::{Catalog, CatalogMaterial, SCHEMA_VERSION, catalog::*};
+use crate::domain::valueobject::{
+    Catalog, CatalogMaterial, CompositionRecipe, CompositionRecipeSlot, GuideSlot, RecipeSelection,
+    SCHEMA_VERSION, catalog::*,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::{
     collections::BTreeMap,
@@ -10,7 +13,8 @@ use std::{
 use thiserror::Error;
 
 const APPLICATION_ID: i64 = 1129665603;
-const CATALOG_VERSION: i64 = 2;
+const CATALOG_VERSION: i64 = 3;
+const PREVIOUS_CATALOG_VERSION: i64 = 2;
 
 #[derive(Debug, Error)]
 pub enum CatalogError {
@@ -71,7 +75,12 @@ impl SqliteCatalog {
         configure(&connection)?;
         let app: i64 = connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if app != APPLICATION_ID || version != CATALOG_VERSION {
+        if app != APPLICATION_ID {
+            return Err(CatalogError::UnsupportedSchema);
+        }
+        if version == PREVIOUS_CATALOG_VERSION {
+            migrate_to_current_schema(&connection)?;
+        } else if version != CATALOG_VERSION {
             return Err(CatalogError::UnsupportedSchema);
         }
         let root: String =
@@ -249,6 +258,82 @@ impl SqliteCatalog {
             materials,
         })
     }
+
+    pub fn save_recipe(&mut self, recipe: &CompositionRecipe) -> Result<(), CatalogError> {
+        let tx = self.connection.transaction()?;
+        tx.execute(
+            "INSERT INTO composition_recipe(id) VALUES(1)
+             ON CONFLICT(id) DO UPDATE SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            [],
+        )?;
+        tx.execute("DELETE FROM composition_recipe_slots WHERE recipe_id=1", [])?;
+        for recipe_slot in &recipe.slots {
+            let selection = recipe_slot.selection.as_ref();
+            let reasons = selection
+                .map(|selection| serde_json::to_string(&selection.reasons))
+                .transpose()?;
+            tx.execute(
+                "INSERT INTO composition_recipe_slots(
+                    recipe_id,slot_order,role,query,selected_material_id,selected_score,
+                    selected_reasons_json
+                 ) VALUES(1,?1,?2,?3,?4,?5,COALESCE(?6,'[]'))",
+                params![
+                    recipe_slot.slot.order as i64,
+                    recipe_slot.slot.role,
+                    recipe_slot.slot.query,
+                    selection.map(|selection| selection.material_id.as_str()),
+                    selection.map(|selection| selection.score),
+                    reasons,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn load_recipe(&self) -> Result<Option<CompositionRecipe>, CatalogError> {
+        let exists: Option<i64> = self
+            .connection
+            .query_row("SELECT id FROM composition_recipe WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        if exists.is_none() {
+            return Ok(None);
+        }
+
+        let mut statement = self.connection.prepare(
+            "SELECT slot_order,role,query,selected_material_id,selected_score,
+                    selected_reasons_json
+             FROM composition_recipe_slots WHERE recipe_id=1 ORDER BY slot_order",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut slots = Vec::new();
+        while let Some(row) = rows.next()? {
+            let order: i64 = row.get(0)?;
+            let selected_material_id: Option<String> = row.get(3)?;
+            let selected_score: Option<u32> = row.get(4)?;
+            let selected_reasons_json: String = row.get(5)?;
+            let selection = match (selected_material_id, selected_score) {
+                (Some(material_id), Some(score)) => Some(RecipeSelection {
+                    material_id,
+                    score,
+                    reasons: serde_json::from_str(&selected_reasons_json)?,
+                }),
+                _ => None,
+            };
+            slots.push(CompositionRecipeSlot {
+                slot: GuideSlot {
+                    id: format!("slot-{order}"),
+                    order: order as usize,
+                    role: row.get(1)?,
+                    query: row.get(2)?,
+                },
+                selection,
+            });
+        }
+        Ok(Some(CompositionRecipe { slots }))
+    }
 }
 
 fn normalize_path(path: PathBuf) -> PathBuf {
@@ -268,6 +353,27 @@ fn normalize_path(path: PathBuf) -> PathBuf {
 fn configure(connection: &Connection) -> Result<(), CatalogError> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.busy_timeout(Duration::from_secs(5))?;
+    Ok(())
+}
+
+fn migrate_to_current_schema(connection: &Connection) -> Result<(), CatalogError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS composition_recipe (
+             id INTEGER PRIMARY KEY CHECK(id=1),
+             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+         );
+         CREATE TABLE IF NOT EXISTS composition_recipe_slots (
+             recipe_id INTEGER NOT NULL REFERENCES composition_recipe(id) ON DELETE CASCADE,
+             slot_order INTEGER NOT NULL CHECK(slot_order>0),
+             role TEXT NOT NULL,
+             query TEXT NOT NULL,
+             selected_material_id TEXT,
+             selected_score INTEGER,
+             selected_reasons_json TEXT NOT NULL DEFAULT '[]',
+             PRIMARY KEY(recipe_id,slot_order)
+         );
+         PRAGMA user_version = 3;",
+    )?;
     Ok(())
 }
 
@@ -418,5 +524,67 @@ mod tests {
         let report = catalog.rescan().unwrap();
         assert_eq!(report.removed, 1);
         assert!(catalog.materials().unwrap().is_empty());
+    }
+
+    #[test]
+    fn recipe_round_trip_keeps_order_selection_and_reasons_across_rescan() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        let original = materials.join("01-tekkaman.wav");
+        let renamed = materials.join("01-tekkaman-renamed.wav");
+        std::fs::write(&original, b"fixture").unwrap();
+
+        let path = temp.path().join("material-catalog.sqlite");
+        let mut catalog = SqliteCatalog::create(&path, temp.path()).unwrap();
+        catalog.rescan().unwrap();
+        assert!(catalog.load_recipe().unwrap().is_none());
+
+        let material_id = format!("material-{}", catalog.materials().unwrap()[0].id);
+        let recipe = CompositionRecipe {
+            slots: vec![CompositionRecipeSlot {
+                slot: GuideSlot {
+                    id: "slot-1".into(),
+                    order: 1,
+                    role: "導入".into(),
+                    query: "テッカマン".into(),
+                },
+                selection: Some(RecipeSelection {
+                    material_id: material_id.clone(),
+                    score: 4,
+                    reasons: vec!["ファイル名に一致".into()],
+                }),
+            }],
+        };
+        catalog.save_recipe(&recipe).unwrap();
+        let loaded = catalog.load_recipe().unwrap().unwrap();
+        assert_eq!(loaded.slots[0].slot.order, 1);
+        assert_eq!(loaded.slots[0].slot.role, "導入");
+        assert_eq!(
+            loaded.slots[0]
+                .selection
+                .as_ref()
+                .map(|selection| selection.material_id.as_str()),
+            Some(material_id.as_str())
+        );
+
+        std::fs::rename(&original, &renamed).unwrap();
+        catalog.rescan().unwrap();
+        let loaded = catalog.load_recipe().unwrap().unwrap();
+        assert_eq!(loaded.slots[0].slot.query, "テッカマン");
+        assert_eq!(
+            loaded.slots[0]
+                .selection
+                .as_ref()
+                .map(|selection| selection.material_id.as_str()),
+            Some(material_id.as_str())
+        );
+        assert_eq!(
+            loaded.slots[0]
+                .selection
+                .as_ref()
+                .map(|selection| selection.reasons.as_slice()),
+            Some(["ファイル名に一致".to_owned()].as_slice())
+        );
     }
 }
