@@ -31,12 +31,13 @@ New-Item -ItemType Directory -Force -Path $cutupWhisperDir | Out-Null
 Invoke-WebRequest 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.7.6/whisper-bin-x64.zip' -OutFile (Join-Path $cutupWhisperDir 'whisper.zip')
 Expand-Archive -LiteralPath (Join-Path $cutupWhisperDir 'whisper.zip') -DestinationPath $cutupWhisperDir
 Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin' -OutFile (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
-& (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe') --help
+& (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe') --help 2>&1 | Select-String '^usage:'
+Test-Path -LiteralPath (Join-Path $cutupWhisperDir 'ggml-tiny.bin') -PathType Leaf
 Write-Output (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe')
 Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
 ```
 
-ヘルプが表示され、最後に表示される2行が実行ファイルとモデルのパスです。小型モデルは誤認識するため、結果を確認してください。不要になったらアプリ終了後に `$env:LOCALAPPDATA\cutup-studio\whisper` を削除できます。
+`usage:` で始まる1行と `True` が表示されれば、実行ファイルが起動し、モデルファイルが存在します。これはモデルの読み込みや文字起こしの成否までは確認しません。最後に表示される2行が実行ファイルとモデルのパスです。この v1.7.6 の Windows 版は `--version` に対応していません。小型モデルは誤認識するため、結果を確認してください。不要になったらアプリ終了後に `$env:LOCALAPPDATA\cutup-studio\whisper` を削除できます。
 
 ## 3. Ollama（説明候補も作る場合）
 
