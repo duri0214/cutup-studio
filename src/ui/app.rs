@@ -246,8 +246,28 @@ impl StudioApp {
             return;
         }
         let candidate_count: usize = plan.slots.iter().map(|slot| slot.candidates.len()).sum();
-        self.selections
-            .retain(|slot_id, _| plan.slots.iter().any(|slot| slot.slot.id == *slot_id));
+        self.selections.retain(|slot_id, selected| {
+            let Some(slot) = plan.slots.iter().find(|slot| slot.slot.id == *slot_id) else {
+                return false;
+            };
+            let unchanged = self.plan.as_ref().is_some_and(|previous| {
+                previous.slots.iter().any(|old| {
+                    old.slot.id == *slot_id
+                        && old.slot.role == slot.slot.role
+                        && old.slot.query == slot.slot.query
+                })
+            });
+            if let Some(current) = slot
+                .candidates
+                .iter()
+                .find(|candidate| unchanged && candidate.material_id == selected.material_id)
+            {
+                *selected = current.clone();
+                true
+            } else {
+                false
+            }
+        });
         self.active_slot = Some(0);
         self.status = format!(
             "{}件の候補を表示しました — 02 / COMPOSITION GUIDE で素材を選んでください。",
@@ -540,10 +560,14 @@ impl StudioApp {
         let mut role_to_add = None;
         let mut guide_changed = false;
         let mut reset_selections = false;
+        let mut focused_guide = None;
         theme::panel().show(ui, |ui| {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(theme::detail_muted(
                 "役割を選び、探したい語句・タグを入力します。",
+            ));
+            ui.label(theme::detail_muted(
+                "登録した役割と、入力した語句のいずれかが一致する素材を表示します。同じ素材を複数の枠で選べます。",
             ));
             ui.horizontal_wrapped(|ui| {
                 theme::caption(ui, "ADD SLOT");
@@ -560,17 +584,27 @@ impl StudioApp {
             let mut drop_target = None;
             let dragged_index = self.dragged_guide_index;
             let can_remove = self.guide_inputs.len() > 1;
+            let mut populated_order = 0;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
+                let label = if guide_input.query.trim().is_empty() {
+                    guide_input.role.clone()
+                } else {
+                    populated_order += 1;
+                    format!("{populated_order:02} {}", guide_input.role)
+                };
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
                     if drag_response.drag_started() {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    theme::role_label(ui, &guide_input.role);
+                    theme::role_label(ui, &label);
                     let response =
                         theme::text_input(ui, &mut guide_input.query, "探したい語句・タグ", 330.0);
                     guide_changed |= response.changed();
+                    if response.gained_focus() || response.changed() {
+                        focused_guide = Some(index);
+                    }
                     if can_remove
                         && theme::icon_button(
                             ui,
@@ -626,6 +660,11 @@ impl StudioApp {
                     self.selections.clear();
                 }
                 self.build_plan();
+            }
+            if let Some(index) = focused_guide
+                && let Some(slot_index) = active_slot_for_input(&self.guide_inputs, index)
+            {
+                self.active_slot = Some(slot_index);
             }
         });
     }
@@ -916,6 +955,45 @@ fn guide_text_from_inputs(guide_inputs: &[GuideInput]) -> String {
         .join("\n")
 }
 
+fn active_slot_for_input(inputs: &[GuideInput], index: usize) -> Option<usize> {
+    let input = inputs.get(index)?;
+    if input.query.trim().is_empty() {
+        return None;
+    }
+    Some(
+        inputs[..index]
+            .iter()
+            .filter(|input| !input.query.trim().is_empty())
+            .count(),
+    )
+}
+
 fn demo_material_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_focus_maps_to_populated_slot_even_with_empty_rows() {
+        let inputs = vec![
+            GuideInput {
+                role: "導入".into(),
+                query: "テッカマン".into(),
+            },
+            GuideInput {
+                role: "導入".into(),
+                query: String::new(),
+            },
+            GuideInput {
+                role: "導入".into(),
+                query: "テッカマン".into(),
+            },
+        ];
+        assert_eq!(active_slot_for_input(&inputs, 0), Some(0));
+        assert_eq!(active_slot_for_input(&inputs, 1), None);
+        assert_eq!(active_slot_for_input(&inputs, 2), Some(1));
+    }
 }

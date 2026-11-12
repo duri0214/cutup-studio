@@ -90,21 +90,13 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
         return None;
     }
     let mut score = 0;
-    let mut reasons = Vec::new();
+    let mut reasons = vec![format!("役割「{}」が一致", slot.role)];
     let file_name = material
         .source_path
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(&material.source_path);
     let normalized_file_name = file_name.to_lowercase();
-    let searchable = format!(
-        "{} {} {} {}",
-        material.keywords.join(" "),
-        material.tags.join(" "),
-        material.roles.join(" "),
-        material.note
-    )
-    .to_lowercase();
     for term in slot
         .query
         .split(|character: char| {
@@ -116,9 +108,20 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
         if normalized_file_name.contains(&normalized_term) {
             score += 2;
             reasons.push(format!("ファイル名「{file_name}」に「{term}」が一致"));
-        } else if searchable.contains(&normalized_term) {
-            score += 2;
-            reasons.push(format!("素材情報に「{term}」が一致"));
+        }
+        for (label, values) in [
+            ("検索語句", material.keywords.as_slice()),
+            ("タグ", material.tags.as_slice()),
+            ("役割", material.roles.as_slice()),
+            ("メモ", std::slice::from_ref(&material.note)),
+        ] {
+            if values
+                .iter()
+                .any(|value| value.to_lowercase().contains(&normalized_term))
+            {
+                score += 2;
+                reasons.push(format!("{label}に「{term}」が一致"));
+            }
         }
     }
     (score > 0).then(|| Candidate {
@@ -175,10 +178,35 @@ mod tests {
         assert_eq!(candidate.material_id, "tekkaman");
         assert_eq!(
             candidate.reasons,
-            ["ファイル名「01-tekkaman.mp4」に「t」が一致"]
+            [
+                "役割「導入」が一致",
+                "ファイル名「01-tekkaman.mp4」に「t」が一致"
+            ]
         );
 
         let plan = create_plan(&catalog(), "つなぎ: t");
         assert!(plan.slots[0].candidates.is_empty());
+    }
+
+    #[test]
+    fn multiple_slots_show_matching_fields_and_allow_the_same_material() {
+        let plan = create_plan(&catalog(), "導入: テッカマン 登場\n導入: tekkaman");
+        assert_eq!(plan.slots.len(), 2);
+        assert_eq!(plan.slots[0].candidates.len(), 1);
+        assert_eq!(plan.slots[1].candidates.len(), 1);
+        assert_eq!(
+            plan.slots[0].candidates[0].material_id,
+            plan.slots[1].candidates[0].material_id
+        );
+        assert!(
+            plan.slots[0].candidates[0]
+                .reasons
+                .contains(&"検索語句に「テッカマン」が一致".to_owned())
+        );
+        assert!(
+            plan.slots[0].candidates[0]
+                .reasons
+                .contains(&"タグに「登場」が一致".to_owned())
+        );
     }
 }
