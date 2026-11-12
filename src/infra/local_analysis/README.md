@@ -23,7 +23,9 @@ ffmpeg -version
 
 ## 2. whisper.cpp と音声認識モデル
 
-PowerShell で次を実行します。Windows x64 用の whisper.cpp v1.7.6 と、日本語を含む小型モデルをユーザー領域に保存します。ダウンロードには通信と空き容量が必要です。
+初回だけ、PowerShell で次を実行します。Windows x64 用の whisper.cpp v1.7.6 と、日本語を含む小型モデルをユーザー領域に保存します。ダウンロードには通信と空き容量が必要です。導入済みの場合は、再ダウンロード・再展開せず、次の「導入後の確認」に進んでください。
+
+再実行すると、展開先に同名のファイルがあるため `Expand-Archive` がエラーになることがあります。エラーが出たときは、まず表示された内容を確認し、下の確認手順を実行してください。
 
 ```powershell
 $cutupWhisperDir = Join-Path $env:LOCALAPPDATA 'cutup-studio\whisper'
@@ -31,6 +33,14 @@ New-Item -ItemType Directory -Force -Path $cutupWhisperDir | Out-Null
 Invoke-WebRequest 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.7.6/whisper-bin-x64.zip' -OutFile (Join-Path $cutupWhisperDir 'whisper.zip')
 Expand-Archive -LiteralPath (Join-Path $cutupWhisperDir 'whisper.zip') -DestinationPath $cutupWhisperDir
 Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin' -OutFile (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
+```
+
+### 導入後の確認
+
+何度でも実行できます。ファイルのダウンロードや書き換えは行いません。
+
+```powershell
+$cutupWhisperDir = Join-Path $env:LOCALAPPDATA 'cutup-studio\whisper'
 & (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe') --help 2>&1 | Select-String '^usage:'
 Test-Path -LiteralPath (Join-Path $cutupWhisperDir 'ggml-tiny.bin') -PathType Leaf
 Write-Output (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe')
