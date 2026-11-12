@@ -41,30 +41,31 @@ Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
 ## 3. Ollama（説明候補も作る場合）
 
 1. [Ollama ダウンロード](https://ollama.com/download) を開き、`Windows` → `Download manually` を選んで `OllamaSetup.exe` を保存し、ダブルクリックしてインストールします。通常は管理者権限不要です。既定のインストール先は `%LOCALAPPDATA%\Programs\Ollama` です。
-2. スタートメニューから Ollama を起動し、新しい PowerShell で次を実行します。`gemma4:e2b` は動作確認の例で、モデルの取得には数 GB の空き容量と通信が必要です。取得後のサイズは `ollama list` で確認できます。
+2. スタートメニューから Ollama を起動します。インストール前から開いていた PowerShell では、まず次を実行して、このウィンドウの PATH に Ollama を追加します。既定のインストール先が異なる場合は、そのフォルダに置き換えてください。
 
    ```powershell
+   $env:Path += ";$env:LOCALAPPDATA\Programs\Ollama"
    ollama --version
+   ```
+
+   バージョンが表示されることを確認してから、次のコマンドでモデルを取得します。`gemma4:e2b` は動作確認の例で、取得には数 GB の空き容量と通信が必要です。
+
+   ```powershell
    ollama pull gemma4:e2b
    ollama list
    ollama run gemma4:e2b "こんにちは、と一言だけ返してください"
    ```
 
-   バージョン、モデル名、応答が表示されれば準備完了です。アプリはローカル API `http://127.0.0.1:11434` に接続します。クラウドモデルは使用できません。
+   モデル名と応答が表示されれば準備完了です。アプリはローカル API `http://127.0.0.1:11434` に接続します。クラウドモデルは使用できません。
+
+   `$env:Path += ...` は現在の PowerShell ウィンドウだけに有効です。通常は Ollama のインストーラーがユーザーの PATH に登録するため、PowerShell を起動しているターミナルアプリごと終了して開き直すと、新しいウィンドウにも反映されます。ユーザー PATH に登録がない場合は、Windows で「環境変数を編集」と検索し、「ユーザー環境変数」の `Path` → `編集` → `新規` から `C:\Users\<ユーザー名>\AppData\Local\Programs\Ollama`（既定のインストール先）を追加し、`OK` で保存してターミナルアプリを開き直します。既に同じ項目があれば追加不要です。
 3. Ollama を停止するときは通知領域の Ollama を終了します。確認用モデルは `ollama rm gemma4:e2b` で削除できます。本体は Windows の「インストールされているアプリ」から削除します。保存先を変更したモデルは別途管理してください。
 
 ### インストール失敗時
 
 #### `ollama` がコマンドとして認識されない
 
-インストール前から開いていた PowerShell では、追加された PATH が反映されない場合があります。PowerShell を開き直しても同じ場合は、現在のウィンドウで次を実行します。
-
-```powershell
-$env:Path += ";$env:LOCALAPPDATA\Programs\Ollama"
-ollama --version
-```
-
-この変更は現在のウィンドウだけに有効です。まだ見つからなければ、`& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" --version` で実行ファイルを直接確認します。別の場所にインストールした場合はその場所を指定してください。
+手順 2 で PATH を追加しても見つからなければ、`& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" --version` で実行ファイルを直接確認します。別の場所にインストールした場合はその場所を指定してください。実行ファイル自体が見つからない場合は、手順 1 のインストールを確認します。
 
 #### `Installation failed with exit code 5`
 
