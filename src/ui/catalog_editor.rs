@@ -1,4 +1,4 @@
-use crate::infra::{
+use crate::infra::local_analysis::{
     local_stt::{self, SttConfig},
     ollama,
 };

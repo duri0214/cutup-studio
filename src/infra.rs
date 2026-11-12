@@ -1,4 +1,3 @@
-pub mod local_stt;
+pub mod local_analysis;
 mod material_scan;
-pub mod ollama;
 pub mod sqlite_catalog;

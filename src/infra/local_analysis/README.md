@@ -1,0 +1,80 @@
+# ローカル解析の準備（Windows）
+
+素材の台詞を文字で探すため、音声を STT（音声認識）で文字起こしします。必要に応じて、その文字から Ollama が内容や反応の候補を作ります。どちらも確認・修正するための候補です。現在、解析候補は既存の検索にはまだ反映されません。
+
+| 必要なもの | 用途 | 必要なとき |
+| --- | --- | --- |
+| FFmpeg | 動画・音声を文字起こし用の音声に変換 | 文字起こし |
+| whisper.cpp と音声認識モデル | 音声を文字と時刻に変換 | 文字起こし |
+| Ollama とローカルモデル | 文字起こしから説明候補を作成 | 説明候補も作る場合 |
+
+どれもアプリの通常起動や手入力には不要です。素材はクラウドに送信せず、Ollama の API キーも不要です。
+
+## 1. FFmpeg
+
+PowerShell で `ffmpeg -version` を実行し、バージョンが出れば次に進みます。見つからない場合は次を実行し、新しい PowerShell を開いて再確認します。
+
+```powershell
+winget install "FFmpeg (Essentials Build)"
+ffmpeg -version
+```
+
+`winget` を使えない場合は [FFmpeg 配布ページ](https://www.gyan.dev/ffmpeg/builds/) の `ffmpeg-release-essentials.zip` を展開し、`bin\ffmpeg.exe` の絶対パスを控えます。アプリに同梱しません。
+
+## 2. whisper.cpp と音声認識モデル
+
+PowerShell で次を実行します。Windows x64 用の whisper.cpp v1.7.6 と、日本語を含む小型モデルをユーザー領域に保存します。ダウンロードには通信と空き容量が必要です。
+
+```powershell
+$cutupWhisperDir = Join-Path $env:LOCALAPPDATA 'cutup-studio\whisper'
+New-Item -ItemType Directory -Force -Path $cutupWhisperDir | Out-Null
+Invoke-WebRequest 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.7.6/whisper-bin-x64.zip' -OutFile (Join-Path $cutupWhisperDir 'whisper.zip')
+Expand-Archive -LiteralPath (Join-Path $cutupWhisperDir 'whisper.zip') -DestinationPath $cutupWhisperDir
+Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin' -OutFile (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
+& (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe') --help
+Write-Output (Join-Path $cutupWhisperDir 'Release\whisper-cli.exe')
+Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
+```
+
+ヘルプが表示され、最後に表示される2行が実行ファイルとモデルのパスです。小型モデルは誤認識するため、結果を確認してください。不要になったらアプリ終了後に `$env:LOCALAPPDATA\cutup-studio\whisper` を削除できます。
+
+## 3. Ollama（説明候補も作る場合）
+
+1. [Ollama ダウンロード](https://ollama.com/download) を開き、`Windows` → `Download manually` を選んで `OllamaSetup.exe` を保存し、ダブルクリックしてインストールします。通常は管理者権限不要です。既定のインストール先は `%LOCALAPPDATA%\Programs\Ollama` です。
+2. スタートメニューから Ollama を起動し、新しい PowerShell で次を実行します。`gemma4:e2b` は動作確認の例で、モデルの取得には約 7.2 GB の空き容量と通信が必要です。
+
+   ```powershell
+   ollama --version
+   ollama pull gemma4:e2b
+   ollama list
+   ollama run gemma4:e2b "こんにちは、と一言だけ返してください"
+   ```
+
+   バージョン、モデル名、応答が表示されれば準備完了です。アプリはローカル API `http://127.0.0.1:11434` に接続します。クラウドモデルは使用できません。
+3. Ollama を停止するときは通知領域の Ollama を終了します。確認用モデルは `ollama rm gemma4:e2b` で削除できます。本体は Windows の「インストールされているアプリ」から削除します。保存先を変更したモデルは別途管理してください。
+
+### インストール失敗時
+
+`irm https://ollama.com/install.ps1 | iex` の `Installation failed with exit code 5` は原因そのものではありません。スクリプトはインストーラーを非表示で実行するため、まず上記の `OllamaSetup.exe` を通常実行し、表示されたエラーを確認してください。
+
+最新のインストールログは PowerShell で次のように確認できます。
+
+```powershell
+Get-ChildItem $env:TEMP -Filter 'Setup Log*.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 40
+```
+
+2026-11-12 に確認したこの PC のログでは、`ollama app.exe` のインストール中に `An error occurred while trying to read the source file` と `指定されたファイルが見つかりません` が記録され、処理が取り消されていました。権限不足とは確認できていません。新しくダウンロードしたインストーラーを通常実行し、同じエラーならログの該当行を確認します。Windows セキュリティなどにブロックの通知がある場合は、その内容も確認します。
+
+ログや画面に `Access is denied` / `アクセスが拒否されました` と明示された場合は、保存先の権限を確認し、必要に応じて `OllamaSetup.exe` を右クリックして「管理者として実行」で再試行できます。管理者での実行は今回のエラーの原因や解決を保証しません。公式の通常インストールはユーザー権限で動きます。
+
+## 4. アプリで使う
+
+`cargo run` → `DEMO` → `素材の情報を登録` → `解析` と開き、素材を選びます。`FFmpeg` に `ffmpeg` または実行ファイルの絶対パス、`whisper-cli` と `Whisper モデル` に上記のパスを入力します。説明候補も必要なら `Ollama モデル（任意）` に `gemma4:e2b` を入力し、`文字起こしを開始` を押します。空欄なら Ollama は使いません。
+
+候補テキストは画面で修正できます。同じ素材と設定では保存済み結果を表示します。同じ名前のモデルを更新した場合など、再実行するときは `同じ素材と設定でも再解析する` を選んでください。再解析が成功すると以前の候補と修正は置き換わります。
+
+## コードの配置
+
+`local_stt.rs` は FFmpeg・whisper.cpp、`ollama.rs` は Ollama への接続を担当します。別のローカル LLM を導入するときは、この `local_analysis/` 内に実装を追加します。解析候補の値と保存はそれぞれ `domain/valueobject/catalog.rs` と `infra/sqlite_catalog.rs` にあります。
+
+参考: [Ollama の Windows 仕様](https://docs.ollama.com/windows)、[インストーラー終了コード](https://jrsoftware.org/ishelp/topic_setupexitcodes.htm)
