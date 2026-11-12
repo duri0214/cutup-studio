@@ -63,7 +63,7 @@ Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
 Get-ChildItem $env:TEMP -Filter 'Setup Log*.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 40
 ```
 
-2026-11-12 に確認したこの PC のログでは、`ollama app.exe` のインストール中に `An error occurred while trying to read the source file` と `指定されたファイルが見つかりません` が記録され、処理が取り消されていました。権限不足とは確認できていません。新しくダウンロードしたインストーラーを通常実行し、同じエラーならログの該当行を確認します。Windows セキュリティなどにブロックの通知がある場合は、その内容も確認します。
+確認例: `ollama app.exe` のインストール中に `An error occurred while trying to read the source file` と `指定されたファイルが見つかりません` が記録され、処理が取り消されたケースがありました。このログだけでは権限不足とは確認できません。新しくダウンロードしたインストーラーを通常実行し、同じエラーならログの該当行を確認します。Windows セキュリティなどにブロックの通知がある場合は、その内容も確認します。
 
 ログや画面に `Access is denied` / `アクセスが拒否されました` と明示された場合は、保存先の権限を確認し、必要に応じて `OllamaSetup.exe` を右クリックして「管理者として実行」で再試行できます。管理者での実行は今回のエラーの原因や解決を保証しません。公式の通常インストールはユーザー権限で動きます。
 
