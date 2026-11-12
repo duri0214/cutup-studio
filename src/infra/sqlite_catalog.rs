@@ -13,7 +13,7 @@ use std::{
 use thiserror::Error;
 
 const APPLICATION_ID: i64 = 1129665603;
-const CATALOG_VERSION: i64 = 3;
+const CATALOG_VERSION: i64 = 4;
 const PREVIOUS_CATALOG_VERSION: i64 = 2;
 
 #[derive(Debug, Error)]
@@ -62,6 +62,7 @@ impl SqliteCatalog {
         configure(&connection)?;
         let tx = connection.transaction()?;
         tx.execute_batch(include_str!("catalog_schema.sql"))?;
+        tx.execute_batch(include_str!("analysis_schema.sql"))?;
         tx.execute(
             "INSERT INTO catalog(id,material_root) VALUES(1,?1)",
             [root_text],
@@ -80,8 +81,13 @@ impl SqliteCatalog {
         }
         if version == PREVIOUS_CATALOG_VERSION {
             migrate_to_current_schema(&connection)?;
-        } else if version != CATALOG_VERSION {
+        } else if version != 3 && version != CATALOG_VERSION {
             return Err(CatalogError::UnsupportedSchema);
+        }
+        if version == PREVIOUS_CATALOG_VERSION || version == 3 {
+            let tx = connection.unchecked_transaction()?;
+            tx.execute_batch(include_str!("analysis_schema.sql"))?;
+            tx.commit()?;
         }
         let root: String =
             connection.query_row("SELECT material_root FROM catalog WHERE id=1", [], |row| {
@@ -94,6 +100,52 @@ impl SqliteCatalog {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn analysis(&self, material_id: i64) -> Result<Option<AnalysisRecord>, CatalogError> {
+        let row: Option<(String, String, String, String, Option<String>)> = self.connection.query_row(
+            "SELECT fingerprint, configuration, status, candidates_json, error FROM analysis_jobs WHERE material_id=?1",
+            [material_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).optional()?;
+        row.map(|(fingerprint, configuration, status, candidates, error)| {
+            let status = match status.as_str() {
+                "running" => AnalysisStatus::Running,
+                "completed" => AnalysisStatus::Completed,
+                "failed" => AnalysisStatus::Failed,
+                "interrupted" => AnalysisStatus::Interrupted,
+                _ => return Err(CatalogError::UnsupportedSchema),
+            };
+            Ok(AnalysisRecord {
+                fingerprint,
+                configuration,
+                status,
+                candidates: serde_json::from_str(&candidates)?,
+                error,
+            })
+        })
+        .transpose()
+    }
+
+    pub fn save_analysis(
+        &mut self,
+        material_id: i64,
+        record: &AnalysisRecord,
+    ) -> Result<(), CatalogError> {
+        let status = match record.status {
+            AnalysisStatus::Running => "running",
+            AnalysisStatus::Completed => "completed",
+            AnalysisStatus::Failed => "failed",
+            AnalysisStatus::Interrupted => "interrupted",
+        };
+        self.connection.execute(
+            "INSERT INTO analysis_jobs(material_id,fingerprint,configuration,status,candidates_json,error)
+             VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(material_id) DO UPDATE SET
+             fingerprint=excluded.fingerprint,configuration=excluded.configuration,status=excluded.status,
+             candidates_json=excluded.candidates_json,error=excluded.error",
+            params![material_id, record.fingerprint, record.configuration, status, serde_json::to_string(&record.candidates)?, record.error],
+        )?;
+        Ok(())
     }
 
     pub fn rescan(&mut self) -> Result<ScanReport, CatalogError> {
@@ -433,6 +485,44 @@ fn refresh_search(connection: &Connection, id: i64) -> Result<(), CatalogError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_candidates_are_separate_from_manual_metadata_and_follow_material_lifecycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        fs::create_dir(&materials).unwrap();
+        fs::write(materials.join("sample.wav"), b"sample").unwrap();
+        let path = temp.path().join("catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
+        store.rescan().unwrap();
+        let material = store.materials().unwrap().remove(0);
+        let record = AnalysisRecord {
+            fingerprint: material.fingerprint.clone(),
+            configuration: "model-v1".into(),
+            status: AnalysisStatus::Completed,
+            candidates: vec![AnalysisCandidate {
+                text: "候補".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                model: "model".into(),
+                model_version: "v1".into(),
+                confidence: None,
+                evidence: None,
+            }],
+            error: None,
+        };
+        store.save_analysis(material.id, &record).unwrap();
+        drop(store);
+        let mut store = SqliteCatalog::open(&path).unwrap();
+        assert_eq!(store.analysis(material.id).unwrap(), Some(record));
+        assert_eq!(
+            store.search(&SearchFilter::default()).unwrap()[0].metadata,
+            Metadata::default()
+        );
+        fs::remove_file(materials.join("sample.wav")).unwrap();
+        store.rescan().unwrap();
+        assert_eq!(store.analysis(material.id).unwrap(), None);
+    }
 
     #[test]
     fn incremental_search_supports_short_filename_query() {
