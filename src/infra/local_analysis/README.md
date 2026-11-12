@@ -41,7 +41,7 @@ Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
 ## 3. Ollama（説明候補も作る場合）
 
 1. [Ollama ダウンロード](https://ollama.com/download) を開き、`Windows` → `Download manually` を選んで `OllamaSetup.exe` を保存し、ダブルクリックしてインストールします。通常は管理者権限不要です。既定のインストール先は `%LOCALAPPDATA%\Programs\Ollama` です。
-2. スタートメニューから Ollama を起動し、新しい PowerShell で次を実行します。`gemma4:e2b` は動作確認の例で、モデルの取得には約 7.2 GB の空き容量と通信が必要です。
+2. スタートメニューから Ollama を起動し、新しい PowerShell で次を実行します。`gemma4:e2b` は動作確認の例で、モデルの取得には数 GB の空き容量と通信が必要です。取得後のサイズは `ollama list` で確認できます。
 
    ```powershell
    ollama --version
