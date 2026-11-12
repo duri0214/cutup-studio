@@ -246,8 +246,28 @@ impl StudioApp {
             return;
         }
         let candidate_count: usize = plan.slots.iter().map(|slot| slot.candidates.len()).sum();
-        self.selections
-            .retain(|slot_id, _| plan.slots.iter().any(|slot| slot.slot.id == *slot_id));
+        self.selections.retain(|slot_id, selected| {
+            let Some(slot) = plan.slots.iter().find(|slot| slot.slot.id == *slot_id) else {
+                return false;
+            };
+            let unchanged = self.plan.as_ref().is_some_and(|previous| {
+                previous.slots.iter().any(|old| {
+                    old.slot.id == *slot_id
+                        && old.slot.role == slot.slot.role
+                        && old.slot.query == slot.slot.query
+                })
+            });
+            if let Some(current) = slot
+                .candidates
+                .iter()
+                .find(|candidate| unchanged && candidate.material_id == selected.material_id)
+            {
+                *selected = current.clone();
+                true
+            } else {
+                false
+            }
+        });
         self.active_slot = Some(0);
         self.status = format!(
             "{}件の候補を表示しました — 02 / COMPOSITION GUIDE で素材を選んでください。",
@@ -544,6 +564,9 @@ impl StudioApp {
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
             ui.label(theme::detail_muted(
                 "役割を選び、探したい語句・タグを入力します。",
+            ));
+            ui.label(theme::detail_muted(
+                "登録した役割と、入力した語句のいずれかが一致する素材を表示します。同じ素材を複数の枠で選べます。",
             ));
             ui.horizontal_wrapped(|ui| {
                 theme::caption(ui, "ADD SLOT");
