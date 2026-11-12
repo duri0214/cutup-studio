@@ -55,6 +55,19 @@ Write-Output (Join-Path $cutupWhisperDir 'ggml-tiny.bin')
 
 ### インストール失敗時
 
+#### `ollama` がコマンドとして認識されない
+
+インストール前から開いていた PowerShell では、追加された PATH が反映されない場合があります。PowerShell を開き直しても同じ場合は、現在のウィンドウで次を実行します。
+
+```powershell
+$env:Path += ";$env:LOCALAPPDATA\Programs\Ollama"
+ollama --version
+```
+
+この変更は現在のウィンドウだけに有効です。まだ見つからなければ、`& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" --version` で実行ファイルを直接確認します。別の場所にインストールした場合はその場所を指定してください。
+
+#### `Installation failed with exit code 5`
+
 `irm https://ollama.com/install.ps1 | iex` の `Installation failed with exit code 5` は原因そのものではありません。スクリプトはインストーラーを非表示で実行するため、まず上記の `OllamaSetup.exe` を通常実行し、表示されたエラーを確認してください。
 
 最新のインストールログは PowerShell で次のように確認できます。
