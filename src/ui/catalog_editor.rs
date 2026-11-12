@@ -1,14 +1,27 @@
+use crate::infra::{
+    local_stt::{self, SttConfig},
+    ollama,
+};
 use crate::{
     domain::valueobject::catalog::*,
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
     ui::theme,
 };
 use eframe::egui::{self, Ui};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EditorTab {
     Search,
     Metadata,
+    Analysis,
 }
 
 pub(super) const PANEL_WIDTH: f32 = 640.0;
@@ -36,6 +49,14 @@ pub(super) struct CatalogEditor {
     active_tab: EditorTab,
     keep_open: bool,
     message: Option<(theme::State, String)>,
+    ffmpeg_path: String,
+    whisper_path: String,
+    model_path: String,
+    ollama_model: String,
+    force_reanalysis: bool,
+    analysis_task: Option<Receiver<(i64, AnalysisRecord)>>,
+    analysis_cancel: Option<Arc<AtomicBool>>,
+    analysis_running_id: Option<i64>,
 }
 
 impl CatalogEditor {
@@ -59,6 +80,14 @@ impl CatalogEditor {
             active_tab: EditorTab::Search,
             keep_open: false,
             message: None,
+            ffmpeg_path: "ffmpeg".into(),
+            whisper_path: "whisper-cli".into(),
+            model_path: String::new(),
+            ollama_model: String::new(),
+            force_reanalysis: false,
+            analysis_task: None,
+            analysis_cancel: None,
+            analysis_running_id: None,
         };
         editor.load_selected();
         Ok(editor)
@@ -74,7 +103,13 @@ impl CatalogEditor {
             ui.horizontal(|ui| {
                 ui.label(theme::caption_text("素材の情報を登録"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::button(ui, "01へ戻る", theme::ButtonKind::Normal).clicked() {
+                    if ui
+                        .add_enabled_ui(self.analysis_task.is_none(), |ui| {
+                            theme::button(ui, "01へ戻る", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
                         self.open = false;
                         event = PanelEvent::Closed;
                     }
@@ -93,10 +128,41 @@ impl CatalogEditor {
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label(
-            theme::body("仮組みでは、素材に入っている言葉・タグ・役割を手で登録します。").strong(),
-        );
-        ui.label(theme::body("将来はローカルLLMがここを自動で埋めます。"));
+        if let Some(task) = &self.analysis_task {
+            match task.try_recv() {
+                Ok((id, record)) => {
+                    let state = if record.status == AnalysisStatus::Completed {
+                        theme::State::Ready
+                    } else {
+                        theme::State::Attention
+                    };
+                    let message = match record.status {
+                        AnalysisStatus::Completed => {
+                            "解析結果を保存しました。解析タブで確認してください。"
+                        }
+                        AnalysisStatus::Interrupted => "解析を中断しました。",
+                        _ => "解析に失敗しました。解析タブで理由を確認してください。",
+                    };
+                    self.message = match self.store.save_analysis(id, &record) {
+                        Ok(()) => Some((state, message.into())),
+                        Err(e) => Some((theme::State::Error, e.to_string())),
+                    };
+                    self.analysis_task = None;
+                    self.analysis_cancel = None;
+                    self.analysis_running_id = None;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.message = Some((theme::State::Error, "解析処理が中断されました。".into()));
+                    self.analysis_task = None;
+                    self.analysis_cancel = None;
+                    self.analysis_running_id = None;
+                }
+                Err(TryRecvError::Empty) => ui
+                    .ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(200)),
+            }
+        }
+        ui.label(theme::body("素材に入っている言葉・タグ・役割を手で登録できます。").strong());
         ui.label(theme::body(
             "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
         ));
@@ -119,12 +185,244 @@ impl CatalogEditor {
                 EditorTab::Metadata,
                 "素材の情報を登録",
             );
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "解析");
         });
         ui.add_space(theme::SPACE_SM);
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
+            EditorTab::Analysis => self.analysis_controls(ui),
         }
+    }
+
+    fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
+        ui.label(theme::body(
+            "選択中の素材をローカルで文字起こしします。結果は手入力の情報と別に保存します。",
+        ));
+        ui.label(theme::body(
+            "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
+        ));
+        let previous = self.material_id;
+        egui::ComboBox::from_id_salt("analysis_material")
+            .selected_text(
+                self.materials
+                    .iter()
+                    .find(|m| Some(m.id) == self.material_id)
+                    .map_or("素材なし", |m| m.source_path.as_str()),
+            )
+            .show_ui(ui, |ui| {
+                for material in &self.materials {
+                    ui.selectable_value(
+                        &mut self.material_id,
+                        Some(material.id),
+                        &material.source_path,
+                    );
+                }
+            });
+        if previous != self.material_id {
+            self.load_selected();
+        }
+        for (label, value) in [
+            ("FFmpeg", &mut self.ffmpeg_path),
+            ("whisper-cli", &mut self.whisper_path),
+            ("Whisper モデル", &mut self.model_path),
+            ("Ollama モデル（任意）", &mut self.ollama_model),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(theme::detail(label));
+                theme::text_input(ui, value, "実行ファイルまたはモデルのパス", 420.0);
+            });
+        }
+        if self.analysis_task.is_some() {
+            ui.label(theme::body("解析中…"));
+            ui.label(theme::detail_muted(
+                "Ollama 実行中の中断は応答を待って反映されます。",
+            ));
+            if theme::button(ui, "解析を中断", theme::ButtonKind::Normal).clicked()
+                && let Some(cancel) = &self.analysis_cancel
+            {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
+        ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
+        if ui
+            .add_enabled_ui(
+                self.analysis_task.is_none() && self.material_id.is_some(),
+                |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
+            )
+            .inner
+            .clicked()
+            && let Some(material) = self
+                .materials
+                .iter()
+                .find(|m| Some(m.id) == self.material_id)
+        {
+            let id = material.id;
+            let path = self.store.root().join(&material.source_path);
+            let root = self.store.root().join("materials");
+            let safe = path
+                .canonicalize()
+                .ok()
+                .zip(root.canonicalize().ok())
+                .filter(|(path, root)| path.starts_with(root));
+            if let Some((path, _)) = safe {
+                let config = SttConfig {
+                    ffmpeg: PathBuf::from(&self.ffmpeg_path),
+                    whisper: PathBuf::from(&self.whisper_path),
+                    model: PathBuf::from(&self.model_path),
+                };
+                let ollama_model = self.ollama_model.trim().to_owned();
+                let fingerprint = material.fingerprint.clone();
+                let configuration = format!("{} / {}", config.model.display(), ollama_model);
+                let previous = match self.store.analysis(id) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        self.message = Some((theme::State::Error, error.to_string()));
+                        self.show_message(ui);
+                        return false;
+                    }
+                };
+                if !self.force_reanalysis
+                    && previous.as_ref().is_some_and(|record| {
+                        record.status == AnalysisStatus::Completed
+                            && record.fingerprint == fingerprint
+                            && record.configuration == configuration
+                    })
+                {
+                    self.message = Some((theme::State::Ready, "同じ素材と設定の解析結果を表示しています。再実行には「同じ素材と設定でも再解析する」を選んでください。".into()));
+                    self.show_message(ui);
+                    return false;
+                }
+                let had_previous = previous.is_some();
+                let mut record = previous.unwrap_or_else(|| AnalysisRecord {
+                    fingerprint: fingerprint.clone(),
+                    configuration: format!("{}", config.model.display()),
+                    status: AnalysisStatus::Running,
+                    candidates: Vec::new(),
+                    error: None,
+                });
+                record.status = AnalysisStatus::Running;
+                record.error = None;
+                match self.store.save_analysis(id, &record) {
+                    Ok(()) => {
+                        let (sender, receiver) = mpsc::channel();
+                        self.analysis_task = Some(receiver);
+                        self.analysis_running_id = Some(id);
+                        let cancel = Arc::new(AtomicBool::new(false));
+                        self.analysis_cancel = Some(Arc::clone(&cancel));
+                        std::thread::spawn(move || {
+                            match local_stt::transcribe(&config, &path, &fingerprint, &cancel) {
+                                Ok(mut candidates) => {
+                                    if !ollama_model.is_empty()
+                                        && !candidates.is_empty()
+                                        && !cancel.load(Ordering::Relaxed)
+                                    {
+                                        match ollama::summarize(&ollama_model, &candidates) {
+                                            Ok(summary) => candidates.push(summary),
+                                            Err(error) => {
+                                                record.error = Some(error.to_string());
+                                                record.status = if cancel.load(Ordering::Relaxed) {
+                                                    AnalysisStatus::Interrupted
+                                                } else {
+                                                    AnalysisStatus::Failed
+                                                };
+                                                if !had_previous {
+                                                    record.fingerprint = fingerprint;
+                                                    record.configuration = configuration;
+                                                    record.candidates = candidates;
+                                                }
+                                                let _ = sender.send((id, record));
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    if cancel.load(Ordering::Relaxed) {
+                                        record.status = AnalysisStatus::Interrupted;
+                                    } else {
+                                        record.fingerprint = fingerprint;
+                                        record.configuration = configuration;
+                                        record.candidates = candidates;
+                                        record.status = AnalysisStatus::Completed;
+                                    }
+                                }
+                                Err(error) => {
+                                    record.error = Some(error.to_string());
+                                    record.status =
+                                        if matches!(error, local_stt::SttError::Interrupted) {
+                                            AnalysisStatus::Interrupted
+                                        } else {
+                                            AnalysisStatus::Failed
+                                        };
+                                }
+                            }
+                            let _ = sender.send((id, record));
+                        });
+                    }
+                    Err(e) => self.message = Some((theme::State::Error, e.to_string())),
+                }
+            } else {
+                self.message = Some((
+                    theme::State::Error,
+                    "素材を読み取れません。基準フォルダを開き直してください。".into(),
+                ));
+            }
+        }
+        if let Some(id) = self.material_id {
+            match self.store.analysis(id) {
+                Ok(Some(mut record)) => {
+                    if record.status == AnalysisStatus::Running && self.analysis_task.is_none() {
+                        ui.label(theme::body(
+                            "前回の解析は完了していません。必要なら再解析してください。",
+                        ));
+                    }
+                    if let Some(error) = &record.error {
+                        ui.label(theme::body(error));
+                    }
+                    if self
+                        .materials
+                        .iter()
+                        .find(|m| m.id == id)
+                        .is_some_and(|m| m.fingerprint != record.fingerprint)
+                    {
+                        ui.label(theme::body("素材が変更されています。再解析してください。"));
+                    }
+                    let mut changed = false;
+                    for candidate in &mut record.candidates {
+                        ui.label(theme::detail(format!(
+                            "{}–{} ms / {} / {}",
+                            candidate.start_ms,
+                            candidate.end_ms,
+                            candidate.model,
+                            candidate.model_version
+                        )));
+                        if let Some(evidence) = &candidate.evidence {
+                            ui.label(theme::detail(evidence));
+                        }
+                        if let Some(language) = &candidate.language {
+                            ui.label(theme::detail(format!("言語候補: {language}")));
+                        }
+                        if let Some(original) = &candidate.original_text
+                            && original != &candidate.text
+                        {
+                            ui.label(theme::detail_muted(format!("生成時: {original}")));
+                        }
+                        changed |= ui
+                            .add_enabled(
+                                self.analysis_task.is_none(),
+                                egui::TextEdit::multiline(&mut candidate.text),
+                            )
+                            .changed();
+                    }
+                    if changed && let Err(e) = self.store.save_analysis(id, &record) {
+                        self.message = Some((theme::State::Error, e.to_string()));
+                    }
+                }
+                Err(e) => self.message = Some((theme::State::Error, e.to_string())),
+                _ => {}
+            }
+        }
+        self.show_message(ui);
+        false
     }
 
     fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
@@ -324,6 +622,21 @@ impl CatalogEditor {
             role: nonempty(&self.role_filter),
         })?;
         Ok(())
+    }
+}
+
+impl Drop for CatalogEditor {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.analysis_cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(id) = self.analysis_running_id
+            && let Ok(Some(mut record)) = self.store.analysis(id)
+        {
+            record.status = AnalysisStatus::Interrupted;
+            record.error = Some("アプリ終了により解析を中断しました".into());
+            let _ = self.store.save_analysis(id, &record);
+        }
     }
 }
 

@@ -35,6 +35,10 @@ pub struct Material {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnalysisCandidate {
     pub text: String,
+    #[serde(default)]
+    pub original_text: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
     pub start_ms: u64,
     pub end_ms: u64,
     pub model: String,

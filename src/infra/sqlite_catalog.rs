@@ -487,6 +487,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn version_three_catalog_migrates_without_losing_materials() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("materials")).unwrap();
+        fs::write(temp.path().join("materials/sample.wav"), b"sample").unwrap();
+        let path = temp.path().join("catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
+        store.rescan().unwrap();
+        let id = store.materials().unwrap()[0].id;
+        store
+            .save_metadata(
+                id,
+                &Metadata {
+                    note: "手入力".into(),
+                    ..Metadata::default()
+                },
+            )
+            .unwrap();
+        store
+            .connection
+            .execute_batch("DROP TABLE analysis_jobs; PRAGMA user_version=3;")
+            .unwrap();
+        drop(store);
+        let store = SqliteCatalog::open(&path).unwrap();
+        assert_eq!(
+            store.search(&SearchFilter::default()).unwrap()[0]
+                .metadata
+                .note,
+            "手入力"
+        );
+        assert!(store.analysis(id).unwrap().is_none());
+    }
+
+    #[test]
     fn analysis_candidates_are_separate_from_manual_metadata_and_follow_material_lifecycle() {
         let temp = tempfile::tempdir().unwrap();
         let materials = temp.path().join("materials");
@@ -502,6 +535,8 @@ mod tests {
             status: AnalysisStatus::Completed,
             candidates: vec![AnalysisCandidate {
                 text: "候補".into(),
+                original_text: Some("候補".into()),
+                language: Some("ja".into()),
                 start_ms: 0,
                 end_ms: 1000,
                 model: "model".into(),
