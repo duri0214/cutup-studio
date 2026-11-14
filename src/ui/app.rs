@@ -933,13 +933,15 @@ impl StudioApp {
             ui.label(theme::detail_muted(
                 "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
             ));
+            let mut encoder_available = false;
             if let Some(editor) = &mut self.editor {
+                encoder_available = super::catalog_editor::executable_exists(&editor.ffmpeg_path);
                 ui.horizontal(|ui| {
                     theme::form_label(ui, "音声エンコード");
                     egui::ComboBox::from_id_salt("export_encoder")
-                        .selected_text("FFmpeg")
+                        .selected_text(if encoder_available { "FFmpeg" } else { "なし" })
                         .show_ui(ui, |ui| {
-                            let _ = ui.selectable_label(true, "FFmpeg");
+                            ui.add_enabled(encoder_available, egui::Label::new("FFmpeg"));
                         });
                 });
                 ui.horizontal_wrapped(|ui| {
@@ -948,7 +950,8 @@ impl StudioApp {
                     } else {
                         editor.ffmpeg_path.clone()
                     };
-                    ui.label(theme::detail_muted(format!("実行ファイル: {source}")));
+                    theme::form_label(ui, "実行ファイル");
+                    ui.add_sized([150.0, theme::INPUT_HEIGHT], egui::Label::new(theme::detail_muted(&source)).truncate()).on_hover_text(&source);
                     if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
@@ -960,7 +963,8 @@ impl StudioApp {
                         editor.ffmpeg_path = "ffmpeg".into();
                     }
                 });
-                if !super::catalog_editor::executable_exists(&editor.ffmpeg_path) {
+                encoder_available = super::catalog_editor::executable_exists(&editor.ffmpeg_path);
+                if !encoder_available {
                     theme::state_message(ui, theme::State::Attention, "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルを選択」で指定してください。");
                 }
             }
@@ -968,7 +972,7 @@ impl StudioApp {
                 theme::state_message(ui, theme::State::Error, error);
             }
             if ui
-                .add_enabled_ui(self.editor.is_some() && self.export_task.is_none(), |ui| {
+                .add_enabled_ui(encoder_available && self.export_task.is_none(), |ui| {
                     theme::button(ui, "WAVを書き出す", theme::ButtonKind::Normal)
                 })
                 .inner

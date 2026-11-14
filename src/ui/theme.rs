@@ -179,9 +179,12 @@ pub fn detail(text: impl Into<String>) -> RichText {
 }
 
 pub fn form_label(ui: &mut Ui, text: &str) {
-    ui.add_sized(
-        [FORM_LABEL_WIDTH, INPUT_HEIGHT],
-        egui::Label::new(detail(text)),
+    ui.allocate_ui_with_layout(
+        Vec2::new(FORM_LABEL_WIDTH, INPUT_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(detail(text));
+        },
     );
 }
 
