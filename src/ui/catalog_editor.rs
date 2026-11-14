@@ -267,7 +267,7 @@ impl CatalogEditor {
                     ui.selectable_value(&mut self.speech_recognition, true, "Whisper");
                 });
             if self.speech_recognition {
-                theme::local_badge(ui);
+                theme::local_label(ui);
             }
         });
         if let Some(task) = &self.ollama_models_task {
@@ -322,7 +322,9 @@ impl CatalogEditor {
                         }
                     }
                 });
-            if theme::button(ui, "モデルを更新", theme::ButtonKind::Normal).clicked()
+            if theme::button(ui, "再読み込み", theme::ButtonKind::Normal)
+                .on_hover_text("利用できるモデルの一覧を再取得")
+                .clicked()
                 && self.ollama_models_task.is_none()
             {
                 let (sender, receiver) = mpsc::channel();
@@ -334,7 +336,7 @@ impl CatalogEditor {
             }
             if !self.ollama_model.is_empty() {
                 ui.label(theme::detail(&self.ollama_model));
-                theme::local_badge(ui);
+                theme::local_label(ui);
             }
         });
         if self.ollama_available == Some(false) {

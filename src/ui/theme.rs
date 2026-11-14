@@ -225,8 +225,8 @@ pub fn ready_badge(ui: &mut Ui, text: &str) {
     state_badge(ui, text, State::Ready);
 }
 
-pub fn local_badge(ui: &mut Ui) {
-    badge_with_color(ui, "ローカル", MUTED);
+pub fn local_label(ui: &mut Ui) {
+    ui.label(detail_muted("ローカル"));
 }
 
 pub fn state_badge(ui: &mut Ui, text: &str, state: State) {
