@@ -8,6 +8,7 @@ use crate::{
     ui::theme,
 };
 use eframe::egui::{self, Ui};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -32,6 +33,28 @@ type AnalysisTask = Receiver<(
     String,
     Option<ollama::MetadataSuggestions>,
 )>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct EditorSettings {
+    whisper_path: String,
+    model_path: String,
+    ollama_model: String,
+    speech_recognition: bool,
+    speech_language: SpeechLanguage,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            whisper_path: default_whisper_path("Release/whisper-cli.exe"),
+            model_path: default_whisper_path("ggml-tiny.bin"),
+            ollama_model: String::new(),
+            speech_recognition: false,
+            speech_language: SpeechLanguage::Auto,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PanelEvent {
@@ -78,7 +101,10 @@ pub(super) struct CatalogEditor {
 }
 
 impl CatalogEditor {
-    pub fn new(store: SqliteCatalog) -> Result<Self, CatalogError> {
+    pub(super) fn with_settings(
+        store: SqliteCatalog,
+        settings: EditorSettings,
+    ) -> Result<Self, CatalogError> {
         let materials = store.materials()?;
         let stored_materials = store.search(&SearchFilter::default())?;
         let material_id = materials.first().map(|material| material.id);
@@ -103,15 +129,15 @@ impl CatalogEditor {
             active_tab: EditorTab::Search,
             keep_open: false,
             message: None,
-            whisper_path: default_whisper_path("Release/whisper-cli.exe"),
-            model_path: default_whisper_path("ggml-tiny.bin"),
-            ollama_model: String::new(),
+            whisper_path: settings.whisper_path,
+            model_path: settings.model_path,
+            ollama_model: settings.ollama_model,
             ollama_models: Vec::new(),
             ollama_models_task: Some(models_receiver),
             ollama_available: None,
             ollama_start_requested: false,
-            speech_recognition: false,
-            speech_language: SpeechLanguage::Auto,
+            speech_recognition: settings.speech_recognition,
+            speech_language: settings.speech_language,
             analysis_task: None,
             analysis_cancel: None,
             analysis_running_id: None,
@@ -119,6 +145,16 @@ impl CatalogEditor {
         };
         editor.load_selected();
         Ok(editor)
+    }
+
+    pub(super) fn settings(&self) -> EditorSettings {
+        EditorSettings {
+            whisper_path: self.whisper_path.clone(),
+            model_path: self.model_path.clone(),
+            ollama_model: self.ollama_model.clone(),
+            speech_recognition: self.speech_recognition,
+            speech_language: self.speech_language,
+        }
     }
 
     pub fn selected_ollama_model(&self) -> Option<&str> {
@@ -383,7 +419,6 @@ impl CatalogEditor {
                 }
                 Ok(Err(error)) => {
                     self.ollama_models.clear();
-                    self.ollama_model.clear();
                     self.ollama_available = Some(false);
                     if self.ollama_start_requested {
                         self.message = Some((theme::State::Error, error.to_string()));
@@ -477,6 +512,11 @@ impl CatalogEditor {
             if !self.ollama_model.is_empty() {
                 ui.label(theme::detail(&self.ollama_model));
                 theme::local_label(ui);
+                if self.ollama_available == Some(false) {
+                    ui.label(theme::detail_muted(
+                        "Ollama は利用できません。選択は保持しています。",
+                    ));
+                }
             }
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
@@ -1232,6 +1272,22 @@ mod tests {
     use crate::domain::service::create_plan;
 
     #[test]
+    fn editor_settings_round_trip_preserves_selected_models_and_paths() {
+        let settings = EditorSettings {
+            whisper_path: "tools/whisper-cli.exe".into(),
+            model_path: "models/ggml-small.bin".into(),
+            ollama_model: "gemma4:e2b".into(),
+            speech_recognition: true,
+            speech_language: SpeechLanguage::Japanese,
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let restored: EditorSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(restored, settings);
+    }
+
+    #[test]
     fn missing_ffmpeg_does_not_prevent_catalog_search() {
         const CHILD: &str = "CUTUP_TEST_WITHOUT_FFMPEG";
         if std::env::var_os(CHILD).is_some() {
@@ -1265,7 +1321,7 @@ mod tests {
         let mut store =
             SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         let first = editor.material_id;
         editor.keywords = "既存の入力".into();
         append_metadata_values(&mut editor.keywords, &["文字起こし".into()]);
@@ -1299,7 +1355,7 @@ mod tests {
         let mut store =
             SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         editor.keywords = "編集中".into();
         editor.note = "残すメモ".into();
         let (sender, receiver) = mpsc::channel();
@@ -1366,7 +1422,11 @@ mod tests {
         store.save_analysis(material.id, &record).unwrap();
         drop(store);
 
-        let mut editor = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        let mut editor = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
         assert!(editor.keywords.is_empty());
         assert!(editor.tags.is_empty());
         assert!(editor.roles.is_empty());
@@ -1387,7 +1447,11 @@ mod tests {
         assert!(!editor.has_unsaved_metadata().unwrap());
         drop(editor);
 
-        let mut editor = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        let mut editor = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
         assert!(editor.keywords.is_empty());
         assert!(editor.tags.is_empty());
         assert!(editor.roles.is_empty());
@@ -1398,7 +1462,11 @@ mod tests {
         editor.save().unwrap();
         assert!(!editor.has_unsaved_metadata().unwrap());
 
-        let reopened = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        let reopened = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
         assert_eq!(reopened.keywords, "何?");
         assert_eq!(reopened.tags, "疑問");
         assert_eq!(reopened.roles, "反応");
@@ -1413,7 +1481,7 @@ mod tests {
         let mut store =
             SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         let id = editor.material_id.unwrap();
         editor.keywords = "手入力語".into();
         editor.tags = "手入力タグ".into();
@@ -1435,7 +1503,7 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_ollama_clears_selected_model_and_available_models() {
+    fn unavailable_ollama_preserves_selected_model_and_clears_available_models() {
         let temp = tempfile::tempdir().unwrap();
         let materials = temp.path().join("materials");
         std::fs::create_dir(&materials).unwrap();
@@ -1443,7 +1511,7 @@ mod tests {
         let path = temp.path().join("catalog.sqlite");
         let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         editor.active_tab = EditorTab::Analysis;
         editor.ollama_model = "gemma4:e2b".into();
         editor.ollama_models = vec!["gemma4:e2b".into()];
@@ -1458,9 +1526,10 @@ mod tests {
             });
         });
 
-        assert!(editor.ollama_model.is_empty());
+        assert_eq!(editor.ollama_model, "gemma4:e2b");
         assert!(editor.ollama_models.is_empty());
         assert_eq!(editor.ollama_available, Some(false));
+        assert_eq!(editor.settings().ollama_model, "gemma4:e2b");
     }
 
     #[test]
@@ -1472,7 +1541,7 @@ mod tests {
         let path = temp.path().join("catalog.sqlite");
         let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         editor.keywords = "テッカマン".into();
         editor.tags = "画, 反応".into();
         editor.roles = "導入".into();
@@ -1485,7 +1554,11 @@ mod tests {
         });
         assert!(!output.shapes.is_empty());
         drop(editor);
-        let reopened = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        let reopened = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
         assert_eq!(
             reopened.stored_materials[0].metadata.tags,
             vec!["画", "反応"]

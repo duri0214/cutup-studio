@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-use super::catalog_editor::{CatalogEditor, PANEL_WIDTH, PanelEvent};
+use super::catalog_editor::{CatalogEditor, EditorSettings, PANEL_WIDTH, PanelEvent};
 use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
@@ -49,6 +49,7 @@ pub struct StudioApp {
     catalog_path: Option<PathBuf>,
     demo_mode: bool,
     editor: Option<CatalogEditor>,
+    editor_settings: EditorSettings,
     catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
@@ -67,11 +68,16 @@ pub struct StudioApp {
 impl StudioApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
         theme::install(&creation_context.egui_ctx);
+        let editor_settings = creation_context
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "editor_settings"))
+            .unwrap_or_default();
         Self {
             catalog: None,
             catalog_path: None,
             demo_mode: false,
             editor: None,
+            editor_settings,
             catalog_task: None,
             guide_inputs: Vec::new(),
             plan: None,
@@ -113,6 +119,9 @@ impl StudioApp {
     }
 
     fn clear_active_catalog(&mut self) {
+        if let Some(editor) = &self.editor {
+            self.editor_settings = editor.settings();
+        }
         self.related_task = None;
         self.catalog = None;
         self.catalog_path = None;
@@ -210,9 +219,10 @@ impl StudioApp {
             }
         };
         self.catalog_task = None;
-        match result
-            .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
-        {
+        let settings = self.editor_settings.clone();
+        match result.and_then(|(store, path, report)| {
+            Ok((CatalogEditor::with_settings(store, settings)?, path, report))
+        }) {
             Ok((mut editor, path, report)) => {
                 let total = editor.count();
                 editor.open = total > 0;
@@ -1045,6 +1055,13 @@ impl StudioApp {
 }
 
 impl eframe::App for StudioApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Some(editor) = &self.editor {
+            self.editor_settings = editor.settings();
+        }
+        eframe::set_value(storage, "editor_settings", &self.editor_settings);
+    }
+
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         if context.input(|input| input.viewport().close_requested()) && self.composition_is_dirty()
         {
@@ -1314,6 +1331,7 @@ mod tests {
             catalog_path: None,
             demo_mode: false,
             editor: None,
+            editor_settings: EditorSettings::default(),
             catalog_task: None,
             guide_inputs: vec![],
             plan: Some(Plan {
