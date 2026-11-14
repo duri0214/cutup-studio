@@ -42,6 +42,8 @@ pub struct StudioApp {
     status: String,
     export_task: Option<Receiver<Result<String, String>>>,
     export_error: Option<String>,
+    saved_composition: Option<CompositionRecipe>,
+    confirm_close: bool,
 }
 
 impl StudioApp {
@@ -60,6 +62,8 @@ impl StudioApp {
             dragged_guide_index: None,
             export_task: None,
             export_error: None,
+            saved_composition: None,
+            confirm_close: false,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
@@ -97,6 +101,7 @@ impl StudioApp {
         self.selections.clear();
         self.active_slot = None;
         self.dragged_guide_index = None;
+        self.saved_composition = None;
     }
 
     fn use_demo_catalog(&mut self, context: &egui::Context) {
@@ -299,21 +304,33 @@ impl StudioApp {
         })
     }
 
-    fn save_recipe(&mut self) {
+    fn composition_is_dirty(&self) -> bool {
+        !same_composition(
+            self.current_recipe().as_ref(),
+            self.saved_composition.as_ref(),
+        )
+    }
+
+    fn save_recipe(&mut self) -> bool {
         let Some(recipe) = self.current_recipe() else {
             self.status = "構成設定を保存するには、02で語句を入力してください。".into();
-            return;
+            return false;
         };
         let Some(editor) = &mut self.editor else {
             self.status = "構成設定を保存するには、基準フォルダを開いてください。".into();
-            return;
+            return false;
         };
         match editor.store.save_recipe(&recipe) {
             Ok(()) => {
+                self.saved_composition = Some(recipe);
                 self.status =
                     "構成設定を保存しました。必要なときに03の「読み込み」で復元できます。".into();
+                true
             }
-            Err(error) => self.status = format!("RECIPE ERROR — 構成設定を保存できません: {error}"),
+            Err(error) => {
+                self.status = format!("RECIPE ERROR — 構成設定を保存できません: {error}");
+                false
+            }
         }
     }
 
@@ -367,6 +384,7 @@ impl StudioApp {
                     }
                 }
                 self.active_slot = Some(0);
+                self.saved_composition = self.current_recipe();
                 self.status = if unavailable_count == 0 {
                     format!(
                         "構成設定を読み込みました。{restored_count}件の選択を03で確認できます。"
@@ -960,8 +978,45 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        if context.input(|input| input.viewport().close_requested()) && self.composition_is_dirty()
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_close = true;
+        }
         self.poll_catalog_task();
         self.poll_export();
+        if self.confirm_close {
+            egui::Modal::new(egui::Id::new("confirm_close_composition")).show(context, |ui| {
+                ui.label(theme::section_title("未保存の構成"));
+                ui.label("構成に保存していない変更があります。閉じると変更は失われます。");
+                ui.label("WAVへの書き出しは構成の保存にはなりません。");
+                if self.status.starts_with("RECIPE ERROR") {
+                    theme::state_message(ui, theme::State::Error, &self.status);
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled_ui(self.current_recipe().is_some(), |ui| {
+                            theme::button(ui, "保存して終了", theme::ButtonKind::Primary)
+                        })
+                        .inner
+                        .clicked()
+                        && self.save_recipe()
+                    {
+                        self.confirm_close = false;
+                        context.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if theme::button(ui, "保存せず終了", theme::ButtonKind::Normal).clicked()
+                    {
+                        self.confirm_close = false;
+                        self.saved_composition = self.current_recipe();
+                        context.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close = false;
+                    }
+                });
+            });
+        }
         let busy = self.catalog_task.is_some();
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
         let mut panel_event = PanelEvent::None;
@@ -1034,6 +1089,23 @@ impl eframe::App for StudioApp {
                     ui.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                 });
             });
+    }
+}
+
+fn same_composition(a: Option<&CompositionRecipe>, b: Option<&CompositionRecipe>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.slots.len() == b.slots.len()
+                && a.slots.iter().zip(&b.slots).all(|(a, b)| {
+                    a.slot.order == b.slot.order
+                        && a.slot.role == b.slot.role
+                        && a.slot.query == b.slot.query
+                        && a.selection.as_ref().map(|s| &s.material_id)
+                            == b.selection.as_ref().map(|s| &s.material_id)
+                })
+        }
+        _ => false,
     }
 }
 
@@ -1129,13 +1201,21 @@ mod tests {
             status: String::new(),
             export_task: None,
             export_error: None,
+            saved_composition: None,
+            confirm_close: false,
         };
         app.selections
             .insert("slot-1".into(), candidate("1", "apple.wav"));
         assert!(app.export_inputs().unwrap()[0].ends_with("apple.wav"));
+        assert!(app.composition_is_dirty());
+        app.saved_composition = app.current_recipe();
+        assert!(!app.composition_is_dirty());
         app.selections
             .insert("slot-1".into(), candidate("2", "pear.wav"));
         assert!(app.export_inputs().unwrap()[0].ends_with("pear.wav"));
+        assert!(app.composition_is_dirty());
+        assert!(!app.save_recipe());
+        assert!(app.composition_is_dirty());
         app.selections.clear();
         assert!(app.export_inputs().unwrap_err().contains("未選択"));
     }
