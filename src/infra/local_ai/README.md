@@ -102,6 +102,6 @@ Get-ChildItem $env:TEMP -Filter 'Setup Log*.txt' | Sort-Object LastWriteTime -De
 
 ## コードの配置
 
-`local_stt.rs` は FFmpeg・whisper.cpp、`ollama.rs` は Ollama への接続を担当します。別のローカル LLM を導入するときは、この `local_analysis/` 内に実装を追加します。解析候補の値と保存はそれぞれ `domain/valueobject/catalog.rs` と `infra/sqlite_catalog.rs` にあります。
+`local_stt.rs` は FFmpeg・whisper.cpp、`ollama.rs` は Ollama への接続を担当します。別のローカル LLM を導入するときは、この `local_ai/` 内に実装を追加します。解析候補の値と保存はそれぞれ `domain/valueobject/catalog.rs` と `infra/sqlite_catalog.rs` にあります。
 
 参考: [Ollama の Windows 仕様](https://docs.ollama.com/windows)、[インストーラー終了コード](https://jrsoftware.org/ishelp/topic_setupexitcodes.htm)
