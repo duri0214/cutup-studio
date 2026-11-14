@@ -412,20 +412,26 @@ impl CatalogEditor {
                 cancel.store(true, Ordering::Relaxed);
             }
         }
-        ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
-        if ui
-            .add_enabled_ui(
-                self.analysis_task.is_none()
-                    && self.material_id.is_some()
-                    && self.audio_conversion
-                    && self.speech_recognition
-                    && executable_exists(&self.ffmpeg_path)
-                    && executable_exists(&self.whisper_path)
-                    && PathBuf::from(&self.model_path).is_file(),
-                |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
-            )
-            .inner
-            .clicked()
+        let start_clicked = ui
+            .horizontal_wrapped(|ui| {
+                let clicked = ui
+                    .add_enabled_ui(
+                        self.analysis_task.is_none()
+                            && self.material_id.is_some()
+                            && self.audio_conversion
+                            && self.speech_recognition
+                            && executable_exists(&self.ffmpeg_path)
+                            && executable_exists(&self.whisper_path)
+                            && PathBuf::from(&self.model_path).is_file(),
+                        |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
+                    )
+                    .inner
+                    .clicked();
+                ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
+                clicked
+            })
+            .inner;
+        if start_clicked
             && let Some(material) = self
                 .materials
                 .iter()
