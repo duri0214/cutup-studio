@@ -921,13 +921,15 @@ impl StudioApp {
             ));
             ui.add_space(theme::SPACE_SM);
             if entries.is_empty() {
-                ui.add_space(theme::SPACE_XL);
-                ui.horizontal_centered(|ui| {
-                    ui.label(theme::body_muted(
-                        "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
-                    ));
-                });
-                ui.add_space(theme::SPACE_XL);
+                ui.label(theme::body_muted(
+                    "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
+                ));
+            }
+            for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
+                candidate.as_ref().map(|candidate| (order, role, candidate))
+            }) {
+                theme::selected_summary_item(ui, *order, &candidate.source_path, role);
+                ui.add_space(theme::SPACE_XXS);
             }
             ui.separator();
             ui.label(theme::detail_muted(
@@ -979,12 +981,6 @@ impl StudioApp {
                 .clicked()
             {
                 export_requested = true;
-            }
-            for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
-                candidate.as_ref().map(|candidate| (order, role, candidate))
-            }) {
-                theme::selected_summary_item(ui, *order, &candidate.source_path, role);
-                ui.add_space(theme::SPACE_XXS);
             }
         });
         if export_requested {
