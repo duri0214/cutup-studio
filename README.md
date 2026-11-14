@@ -68,7 +68,7 @@ cargo run
 
 ## DEMO
 
-`DEMO` は `demo/` を基準フォルダとして使います。日本語の合成音声で作った完成済みWAV素材10本を使えます。素材一覧は [demo/README.md](demo/README.md) を参照してください。
+`DEMO` は `demo/` を基準フォルダとして使います。実際の発音録音と日本語の合成音声を組み合わせて試せます。素材の出典・利用条件と組み合わせ例は [demo/README.md](demo/README.md) を参照してください。
 
 ## 開発
 
