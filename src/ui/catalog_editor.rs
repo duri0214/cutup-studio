@@ -224,7 +224,7 @@ impl CatalogEditor {
 
     fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
         ui.label(theme::body(
-            "選択中の素材を文字起こしします。（結果は手入力の情報と別に保存します。）",
+            "選択中の素材を文字起こしします（結果は手入力の情報と別に保存します）",
         ));
         ui.label(theme::body(
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
