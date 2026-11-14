@@ -113,6 +113,12 @@ impl CatalogEditor {
         self.materials.len()
     }
 
+    pub fn message(&self) -> Option<(theme::State, &str)> {
+        self.message
+            .as_ref()
+            .map(|(state, text)| (*state, text.as_str()))
+    }
+
     pub fn show_panel(&mut self, ui: &mut Ui, enabled: bool) -> PanelEvent {
         let mut event = PanelEvent::None;
         theme::panel().show(ui, |ui| {
@@ -473,6 +479,8 @@ impl CatalogEditor {
                 record.error = None;
                 match self.store.save_analysis(id, &record) {
                     Ok(()) => {
+                        self.message =
+                            Some((theme::State::Ready, "文字起こしを実行しています。".into()));
                         let (sender, receiver) = mpsc::channel();
                         self.analysis_task = Some(receiver);
                         self.analysis_running_id = Some(id);

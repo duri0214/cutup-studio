@@ -884,7 +884,16 @@ impl eframe::App for StudioApp {
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
-                ui.label(theme::status_text(&self.status));
+                if let Some((state, message)) = self
+                    .editor
+                    .as_ref()
+                    .filter(|editor| editor.open)
+                    .and_then(CatalogEditor::message)
+                {
+                    theme::state_message(ui, state, message);
+                } else {
+                    ui.label(theme::status_text(&self.status));
+                }
             });
         });
         egui::SidePanel::right("information-pane")
@@ -895,7 +904,13 @@ impl eframe::App for StudioApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if registering {
                         if let Some(editor) = &mut self.editor {
+                            let previous_message =
+                                editor.message().map(|(_, text)| text.to_owned());
                             panel_event = editor.show_panel(ui, !busy);
+                            if previous_message.as_deref() != editor.message().map(|(_, text)| text)
+                            {
+                                context.request_repaint();
+                            }
                         }
                     } else if self.plan.is_some() {
                         self.show_candidate_pane(ui);
