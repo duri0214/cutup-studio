@@ -727,8 +727,9 @@ impl CatalogEditor {
             "未保存の入力は 02・03 に移動しても保持されます。01 に戻って保存してください。",
         ));
         let selected = self.material_id;
+        let material_selector_width = (ui.available_width() - theme::SPACE_SM).max(120.0);
         egui::ComboBox::from_id_salt("material")
-            .width(640.0)
+            .width(material_selector_width)
             .selected_text(
                 self.materials
                     .iter()
@@ -749,6 +750,7 @@ impl CatalogEditor {
             self.load_selected();
         }
         ui.separator();
+        let metadata_input_width = (ui.available_width() - 150.0).max(120.0);
         egui::Grid::new("metadata").num_columns(2).show(ui, |ui| {
             for (label, value) in [
                 ("検索語句", &mut self.keywords),
@@ -757,7 +759,7 @@ impl CatalogEditor {
                 ("メモ", &mut self.note),
             ] {
                 ui.label(theme::detail(label));
-                theme::text_input(ui, value, "", 510.0);
+                theme::text_input(ui, value, "", metadata_input_width);
                 ui.end_row();
             }
         });
