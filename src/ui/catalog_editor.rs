@@ -694,24 +694,44 @@ impl CatalogEditor {
                                         "当初の生成結果: {original}"
                                     )));
                                 }
-                                ui.collapsing("解析の詳細", |ui| {
-                                    ui.label(theme::detail(format!(
-                                        "使用モデル: {}",
-                                        candidate.model
-                                    )));
-                                    if let Some(language) = &candidate.language {
-                                        let name = match language.as_str() {
-                                            "ja" => "日本語",
-                                            "ko" => "韓国語",
-                                            "en" => "英語",
-                                            _ => language,
-                                        };
-                                        ui.label(theme::detail(format!("言語候補: {name}")));
-                                    }
-                                });
                                 edited
                             })
                             .inner;
+                    }
+                    if !record.candidates.is_empty() {
+                        ui.collapsing("解析の詳細", |ui| {
+                            let mut models = Vec::new();
+                            let mut languages = Vec::new();
+                            for candidate in &record.candidates {
+                                let label = if candidate.evidence.as_deref()
+                                    == Some("文字起こし候補の要約")
+                                {
+                                    "テキスト解析モデル"
+                                } else {
+                                    "音声認識モデル"
+                                };
+                                let model = (label, candidate.model.as_str());
+                                if !models.contains(&model) {
+                                    ui.label(theme::detail(format!(
+                                        "{label}: {}",
+                                        candidate.model
+                                    )));
+                                    models.push(model);
+                                }
+                                if let Some(language) = candidate.language.as_deref()
+                                    && !languages.contains(&language)
+                                {
+                                    let name = match language {
+                                        "ja" => "日本語",
+                                        "ko" => "韓国語",
+                                        "en" => "英語",
+                                        _ => language,
+                                    };
+                                    ui.label(theme::detail(format!("言語候補: {name}")));
+                                    languages.push(language);
+                                }
+                            }
+                        });
                     }
                     if changed && let Err(e) = self.store.save_analysis(id, &record) {
                         self.message = Some((theme::State::Error, e.to_string()));
