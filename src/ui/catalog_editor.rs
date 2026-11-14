@@ -571,10 +571,13 @@ impl CatalogEditor {
                     if !record.candidates.is_empty() {
                         ui.separator();
                         if let Some(material) = self.materials.iter().find(|m| m.id == id) {
-                            ui.label(theme::section_title(format!(
-                                "保存済みの解析結果 — {}",
-                                material.source_path
-                            )));
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(theme::section_title(format!(
+                                    "文字起こし結果 — {}",
+                                    material.source_path
+                                )));
+                                theme::ready_badge(ui, "保存済み");
+                            });
                         }
                     }
                     let mut changed = false;
