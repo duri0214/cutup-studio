@@ -348,10 +348,51 @@ pub fn tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, INPUT_HEIGHT), sense);
+    let text_color = if !enabled {
+        state_color(State::Disabled)
+    } else if selected {
+        state_color(State::Selected)
+    } else {
+        MUTED
+    };
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(TAB_TEXT_SIZE),
+        text_color,
+    );
+    if selected && enabled {
+        ui.painter().line_segment(
+            [
+                Pos2::new(rect.left() + SPACE_SM, rect.bottom() - 1.0),
+                Pos2::new(rect.right() - SPACE_SM, rect.bottom() - 1.0),
+            ],
+            Stroke::new(2.0_f32, state_color(State::Selected)),
+        );
+    }
+    response
+}
+
+pub fn section_tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
+    ui.horizontal(|ui| {
+        let tab_response = tab(ui, label, selected, width);
+        let arrow_response = section_arrow_button(ui, selected);
+        tab_response.union(arrow_response)
+    })
+    .inner
+}
+
+fn section_arrow_button(ui: &mut Ui, selected: bool) -> Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 24.0), sense);
     let fill = if !enabled {
         PANEL
-    } else if selected {
-        SELECTED_BACKGROUND
     } else if response.hovered() {
         CONTROL_HOVERED
     } else {
@@ -362,47 +403,33 @@ pub fn tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
     } else if selected || response.hovered() {
         state_color(State::Selected)
     } else {
-        TEXT
+        MUTED
     };
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
+        .rect_filled(rect, CornerRadius::same(SMALL_CONTROL_RADIUS), fill);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(CONTROL_RADIUS),
-        Stroke::new(
-            1.0_f32,
-            color.gamma_multiply(if selected || response.hovered() {
-                0.8
-            } else {
-                0.45
-            }),
-        ),
+        CornerRadius::same(SMALL_CONTROL_RADIUS),
+        Stroke::new(1.0_f32, color.gamma_multiply(0.75)),
         StrokeKind::Inside,
     );
-    ui.painter().text(
-        Pos2::new(rect.left() + SPACE_SM, rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(TAB_TEXT_SIZE),
-        color,
-    );
-    let chevron = Pos2::new(rect.right() - SPACE_SM, rect.center().y);
-    let chevron_stroke = Stroke::new(1.5_f32, color);
+    let center = rect.center();
+    let stroke = Stroke::new(1.5_f32, color);
     ui.painter().line_segment(
         [
-            Pos2::new(chevron.x - 3.0, chevron.y - 4.0),
-            Pos2::new(chevron.x + 1.0, chevron.y),
+            Pos2::new(center.x - 2.0, center.y - 4.0),
+            Pos2::new(center.x + 2.0, center.y),
         ],
-        chevron_stroke,
+        stroke,
     );
     ui.painter().line_segment(
         [
-            Pos2::new(chevron.x + 1.0, chevron.y),
-            Pos2::new(chevron.x - 3.0, chevron.y + 4.0),
+            Pos2::new(center.x + 2.0, center.y),
+            Pos2::new(center.x - 2.0, center.y + 4.0),
         ],
-        chevron_stroke,
+        stroke,
     );
-    response.on_hover_text("クリックして切り替え")
+    response.on_hover_text("クリックして右ペインを表示")
 }
 
 pub fn text_input(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> Response {
@@ -746,6 +773,57 @@ mod tests {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         let response = super::role_label(ui, "01 反応", false);
                         position = Some(response.rect.center());
+                        clicked = response.clicked();
+                    });
+                },
+            );
+            (position.unwrap(), clicked)
+        }
+
+        let context = egui::Context::default();
+        let (position, _) = show(&context, Vec::new());
+        show(
+            &context,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let (_, clicked) = show(
+            &context,
+            vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+
+        assert!(clicked);
+    }
+
+    #[test]
+    fn section_tab_arrow_responds_to_click() {
+        fn show(context: &egui::Context, events: Vec<egui::Event>) -> (egui::Pos2, bool) {
+            let mut position = None;
+            let mut clicked = false;
+            let _ = context.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let response = super::section_tab(ui, "03 の情報を表示", false, 150.0);
+                        position = Some(egui::pos2(
+                            response.rect.right() - 12.0,
+                            response.rect.center().y,
+                        ));
                         clicked = response.clicked();
                     });
                 },

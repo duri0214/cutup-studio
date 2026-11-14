@@ -523,7 +523,7 @@ impl StudioApp {
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
         let (signal, _) = self.system_status();
         theme::section_panel(self.active_section == Section::Catalog).show(ui, |ui| {
-            if theme::tab(
+            if theme::section_tab(
                 ui,
                 "01 の情報を表示",
                 self.active_section == Section::Catalog,
@@ -632,7 +632,7 @@ impl StudioApp {
         let mut reset_selections = false;
         let mut focused_guide = None;
         theme::section_panel(self.active_section == Section::Guide).show(ui, |ui| {
-            if theme::tab(ui, "02 の候補を表示", self.active_section == Section::Guide, 150.0).clicked() {
+            if theme::section_tab(ui, "02 の候補を表示", self.active_section == Section::Guide, 150.0).clicked() {
                 self.active_section = Section::Guide;
             }
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
@@ -981,7 +981,7 @@ impl StudioApp {
         let mut load_requested = false;
         let mut export_requested = false;
         theme::section_panel(self.active_section == Section::Composition).show(ui, |ui| {
-            if theme::tab(ui, "03 の情報を表示", self.active_section == Section::Composition, 150.0).clicked() {
+            if theme::section_tab(ui, "03 の情報を表示", self.active_section == Section::Composition, 150.0).clicked() {
                 self.active_section = Section::Composition;
             }
             ui.horizontal(|ui| {
