@@ -26,6 +26,12 @@ enum EditorTab {
 }
 
 pub(super) const PANEL_WIDTH: f32 = 640.0;
+type AnalysisTask = Receiver<(
+    i64,
+    AnalysisRecord,
+    String,
+    Option<ollama::MetadataSuggestions>,
+)>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PanelEvent {
@@ -66,7 +72,7 @@ pub(super) struct CatalogEditor {
     speech_recognition: bool,
     speech_language: SpeechLanguage,
     force_reanalysis: bool,
-    analysis_task: Option<Receiver<(i64, AnalysisRecord)>>,
+    analysis_task: Option<AnalysisTask>,
     analysis_cancel: Option<Arc<AtomicBool>>,
     analysis_running_id: Option<i64>,
 }
@@ -167,21 +173,40 @@ impl CatalogEditor {
     fn controls(&mut self, ui: &mut Ui) -> bool {
         if let Some(task) = &self.analysis_task {
             match task.try_recv() {
-                Ok((id, record)) => {
-                    let state = if record.status == AnalysisStatus::Completed {
+                Ok((id, record, transcript, suggestions)) => {
+                    let completed = record.status == AnalysisStatus::Completed;
+                    let partial_failure = record.error.is_some();
+                    let state = if completed && !partial_failure {
                         theme::State::Ready
                     } else {
                         theme::State::Attention
                     };
-                    let message = match record.status {
-                        AnalysisStatus::Completed => {
-                            "入力支援が完了しました。編集欄に取り込んで確認してください。"
+                    let message = match (record.status, partial_failure) {
+                        (AnalysisStatus::Completed, false) => {
+                            "音声から情報を反映しました。編集欄を確認し、必要なら修正してください。"
                         }
-                        AnalysisStatus::Interrupted => "解析を中断しました。",
-                        _ => "解析に失敗しました。編集で理由を確認してください。",
+                        (AnalysisStatus::Completed, true) => {
+                            "文字起こしを反映しました。Ollama の分類に失敗したため、タグと役割を確認してください。"
+                        }
+                        (AnalysisStatus::Interrupted, _) => {
+                            "情報抽出を中断しました。編集中の情報は保持しています。"
+                        }
+                        _ => "解析に失敗しました。編集中の情報は保持しています。",
                     };
                     self.message = match self.store.save_analysis(id, &record) {
-                        Ok(()) => Some((state, message.into())),
+                        Ok(()) => {
+                            if completed {
+                                self.apply_suggestions(id, &transcript, suggestions.as_ref());
+                            }
+                            Some((
+                                state,
+                                if let Some(error) = record.error {
+                                    format!("{message} {error}")
+                                } else {
+                                    message.into()
+                                },
+                            ))
+                        }
                         Err(e) => Some((theme::State::Error, e.to_string())),
                     };
                     self.analysis_task = None;
@@ -199,7 +224,7 @@ impl CatalogEditor {
                     .request_repaint_after(std::time::Duration::from_millis(200)),
             }
         }
-        ui.label(theme::body("素材に入っている言葉・タグ・役割を手で登録できます。").strong());
+        ui.label(theme::body("音声から検索語句を起こし、Ollama でタグと役割を補います。内容を確認して保存できます。").strong());
         ui.label(theme::body(
             "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
         ));
@@ -466,12 +491,12 @@ impl CatalogEditor {
         if self.analysis_task.is_some() {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(16.0).color(theme::ACCENT));
-                ui.label(theme::body("解析中…"));
+                ui.label(theme::body("音声から情報を抽出中…"));
             });
             ui.label(theme::detail_muted(
                 "Ollama 実行中の中断は応答を待って反映されます。",
             ));
-            if theme::button(ui, "解析を中断", theme::ButtonKind::Normal).clicked()
+            if theme::button(ui, "情報抽出を中断", theme::ButtonKind::Normal).clicked()
                 && let Some(cancel) = &self.analysis_cancel
             {
                 cancel.store(true, Ordering::Relaxed);
@@ -487,7 +512,7 @@ impl CatalogEditor {
                             && executable_exists("ffmpeg")
                             && executable_exists(&self.whisper_path)
                             && PathBuf::from(&self.model_path).is_file(),
-                        |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
+                        |ui| theme::button(ui, "音声から情報を起こす", theme::ButtonKind::Primary),
                     )
                     .inner
                     .clicked();
@@ -546,7 +571,6 @@ impl CatalogEditor {
                     self.message = Some((theme::State::Ready, "同じ素材と設定の解析結果を表示しています。再実行には「同じ素材と設定でも再解析する」を選んでください。".into()));
                     return;
                 }
-                let had_previous = previous.is_some();
                 let mut record = previous.unwrap_or_else(|| AnalysisRecord {
                     fingerprint: fingerprint.clone(),
                     configuration: format!("{}", config.model.display()),
@@ -559,35 +583,30 @@ impl CatalogEditor {
                 match self.store.save_analysis(id, &record) {
                     Ok(()) => {
                         self.message =
-                            Some((theme::State::Ready, "文字起こしを実行しています。".into()));
+                            Some((theme::State::Ready, "音声から情報を抽出しています。".into()));
                         let (sender, receiver) = mpsc::channel();
                         self.analysis_task = Some(receiver);
                         self.analysis_running_id = Some(id);
                         let cancel = Arc::new(AtomicBool::new(false));
                         self.analysis_cancel = Some(Arc::clone(&cancel));
                         std::thread::spawn(move || {
+                            let mut suggestions = None;
+                            let mut transcript = String::new();
                             match local_stt::transcribe(&config, &path, &fingerprint, &cancel) {
-                                Ok(mut candidates) => {
+                                Ok(candidates) => {
+                                    transcript = candidates
+                                        .iter()
+                                        .map(|candidate| candidate.text.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
                                     if !ollama_model.is_empty()
                                         && !candidates.is_empty()
                                         && !cancel.load(Ordering::Relaxed)
                                     {
-                                        match ollama::summarize(&ollama_model, &candidates) {
-                                            Ok(summary) => candidates.push(summary),
+                                        match ollama::suggest_metadata(&ollama_model, &transcript) {
+                                            Ok(metadata) => suggestions = Some(metadata),
                                             Err(error) => {
                                                 record.error = Some(error.to_string());
-                                                record.status = if cancel.load(Ordering::Relaxed) {
-                                                    AnalysisStatus::Interrupted
-                                                } else {
-                                                    AnalysisStatus::Failed
-                                                };
-                                                if !had_previous {
-                                                    record.fingerprint = fingerprint;
-                                                    record.configuration = configuration;
-                                                    record.candidates = candidates;
-                                                }
-                                                let _ = sender.send((id, record));
-                                                return;
                                             }
                                         }
                                     }
@@ -610,7 +629,7 @@ impl CatalogEditor {
                                         };
                                 }
                             }
-                            let _ = sender.send((id, record));
+                            let _ = sender.send((id, record, transcript, suggestions));
                         });
                     }
                     Err(e) => self.message = Some((theme::State::Error, e.to_string())),
@@ -622,58 +641,11 @@ impl CatalogEditor {
                 ));
             }
         }
-        if let Some(id) = self.material_id {
-            match self.store.analysis(id) {
-                Ok(Some(record)) => {
-                    if let Some(error) = &record.error {
-                        theme::state_message(ui, theme::State::Error, error);
-                    }
-                    let transcript = record
-                        .candidates
-                        .iter()
-                        .filter(|candidate| {
-                            candidate.evidence.as_deref() != Some("文字起こし候補の要約")
-                        })
-                        .map(|candidate| candidate.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let explanation = record
-                        .candidates
-                        .iter()
-                        .filter(|candidate| {
-                            candidate.evidence.as_deref() == Some("文字起こし候補の要約")
-                        })
-                        .map(|candidate| markdown_plain_text(&candidate.text))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    ui.label(theme::detail_muted(
-                        "取り込みは既存の入力に追記します。確認・編集してから保存してください。",
-                    ));
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add_enabled(
-                                !transcript.is_empty(),
-                                egui::Button::new("文字起こしを検索語句に追記"),
-                            )
-                            .clicked()
-                        {
-                            append_text(&mut self.keywords, &transcript, ", ");
-                        }
-                        if ui
-                            .add_enabled(
-                                !explanation.is_empty(),
-                                egui::Button::new("Ollama の説明をメモに追記"),
-                            )
-                            .clicked()
-                        {
-                            append_text(&mut self.note, &explanation, " ");
-                        }
-                    });
-                }
-                Err(error) => self.message = Some((theme::State::Error, error.to_string())),
-                _ => {}
-            }
-        }
+        ui.label(theme::detail_muted(if self.ollama_model.is_empty() {
+            "実行すると文字起こしが検索語句に入ります。設定で Ollama を選ぶと、タグと役割も補います。"
+        } else {
+            "実行すると検索語句・タグ・役割に情報を反映します。既存の値に重複しないよう追加します。"
+        }));
         self.show_message(ui);
     }
 
@@ -849,6 +821,57 @@ impl CatalogEditor {
         }
     }
 
+    fn apply_suggestions(
+        &mut self,
+        id: i64,
+        transcript: &str,
+        suggestions: Option<&ollama::MetadataSuggestions>,
+    ) {
+        let mut values = if self.material_id == Some(id) {
+            (
+                self.keywords.clone(),
+                self.tags.clone(),
+                self.roles.clone(),
+                self.note.clone(),
+            )
+        } else if let Some(draft) = self.drafts.get(&id) {
+            draft.clone()
+        } else {
+            match self.store.search(&SearchFilter::default()) {
+                Ok(materials) => materials
+                    .into_iter()
+                    .find(|material| material.id == id)
+                    .map(|material| {
+                        (
+                            material.metadata.keywords.join(", "),
+                            material.metadata.tags.join(", "),
+                            material.metadata.roles.join(", "),
+                            material.metadata.note,
+                        )
+                    })
+                    .unwrap_or_default(),
+                Err(error) => {
+                    self.message = Some((theme::State::Error, error.to_string()));
+                    return;
+                }
+            }
+        };
+
+        append_metadata_values(&mut values.0, &[transcript.to_owned()]);
+        if let Some(suggestions) = suggestions {
+            append_metadata_values(&mut values.0, &suggestions.keywords);
+            append_metadata_values(&mut values.1, &suggestions.tags);
+            append_metadata_values(&mut values.2, &suggestions.roles);
+        }
+        self.drafts.insert(id, values.clone());
+        if self.material_id == Some(id) {
+            self.keywords = values.0;
+            self.tags = values.1;
+            self.roles = values.2;
+            self.note = values.3;
+        }
+    }
+
     fn load_selected(&mut self) {
         let Some(id) = self.material_id else {
             return;
@@ -921,17 +944,32 @@ impl Drop for CatalogEditor {
             && let Ok(Some(mut record)) = self.store.analysis(id)
         {
             record.status = AnalysisStatus::Interrupted;
-            record.error = Some("アプリ終了により解析を中断しました".into());
+            record.error = Some("アプリ終了により情報抽出を中断しました".into());
             let _ = self.store.save_analysis(id, &record);
         }
     }
 }
 
-fn append_text(target: &mut String, value: &str, separator: &str) {
-    if !target.trim().is_empty() {
-        target.push_str(separator);
+fn append_metadata_values(target: &mut String, additions: &[String]) {
+    let mut values = split(target);
+    for addition in additions.iter().map(|value| value.trim()) {
+        if !addition.is_empty()
+            && !values
+                .iter()
+                .any(|value| normalize_metadata_value(value) == normalize_metadata_value(addition))
+        {
+            values.push(addition.to_owned());
+        }
     }
-    target.push_str(value.trim());
+    *target = values.join(", ");
+}
+
+fn normalize_metadata_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn split(text: &str) -> Vec<String> {
@@ -973,28 +1011,6 @@ pub(super) fn executable_exists(value: &str) -> bool {
 fn nonempty(text: &str) -> Option<&str> {
     let text = text.trim();
     (!text.is_empty()).then_some(text)
-}
-
-fn markdown_plain_text(markdown: &str) -> String {
-    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
-    let mut text = String::new();
-    for event in Parser::new(markdown) {
-        match event {
-            Event::Text(value) | Event::Code(value) => text.push_str(&value),
-            Event::Start(Tag::Item) => text.push_str("• "),
-            Event::End(
-                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
-            )
-            | Event::SoftBreak
-            | Event::HardBreak
-                if !text.ends_with('\n') =>
-            {
-                text.push('\n')
-            }
-            _ => {}
-        }
-    }
-    text.trim_end().to_owned()
 }
 
 #[cfg(test)]
@@ -1039,7 +1055,7 @@ mod tests {
         let mut editor = CatalogEditor::new(store).unwrap();
         let first = editor.material_id;
         editor.keywords = "既存の入力".into();
-        append_text(&mut editor.keywords, "文字起こし", ", ");
+        append_metadata_values(&mut editor.keywords, &["文字起こし".into()]);
         editor.roles = "導入".into();
         editor.remember_draft(first);
         editor.material_id = Some(editor.materials[1].id);
@@ -1085,6 +1101,8 @@ mod tests {
                     candidates: vec![],
                     error: Some("失敗".into()),
                 },
+                String::new(),
+                None,
             ))
             .unwrap();
         let context = egui::Context::default();
@@ -1099,10 +1117,33 @@ mod tests {
     }
 
     #[test]
-    fn summary_markdown_is_readable_without_raw_formatting() {
-        let text =
-            markdown_plain_text("**内容の候補:**\n\n* **確認:** こんにちは\n* **注意:** 不明です");
-        assert_eq!(text, "内容の候補:\n• 確認: こんにちは\n• 注意: 不明です");
+    fn audio_suggestions_fill_metadata_fields_and_preserve_existing_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::new(store).unwrap();
+        let id = editor.material_id.unwrap();
+        editor.keywords = "手入力語".into();
+        editor.tags = "手入力タグ".into();
+        editor.roles = "導入".into();
+        editor.note = "利用者のメモ".into();
+        editor.apply_suggestions(
+            id,
+            "なに?",
+            Some(&ollama::MetadataSuggestions {
+                keywords: vec!["なに".into(), "補助キーワード".into()],
+                tags: vec!["反応".into(), "手入力タグ".into()],
+                roles: vec!["リアクション".into()],
+            }),
+        );
+        assert_eq!(editor.keywords, "手入力語, なに?, 補助キーワード");
+        assert_eq!(editor.tags, "手入力タグ, 反応");
+        assert_eq!(editor.roles, "導入, リアクション");
+        assert_eq!(editor.note, "利用者のメモ");
     }
 
     #[test]
