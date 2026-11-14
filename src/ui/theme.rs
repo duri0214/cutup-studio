@@ -224,6 +224,10 @@ pub fn panel() -> Frame {
         .inner_margin(PANEL_PADDING)
 }
 
+pub fn section_panel(selected: bool) -> Frame {
+    panel().stroke(Stroke::new(1.0_f32, if selected { ACCENT } else { BORDER }))
+}
+
 pub fn content_frame() -> Frame {
     Frame::new().fill(BACKGROUND).inner_margin(CONTENT_PADDING)
 }

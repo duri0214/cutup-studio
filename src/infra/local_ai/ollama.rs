@@ -217,6 +217,75 @@ fn summarize_at(
     })
 }
 
+/// Produce a small set of search terms; catalog metadata stays local.
+pub fn related_terms(model: &str, query: &str) -> Result<Vec<String>, OllamaError> {
+    let query: String = query.chars().take(200).collect();
+    let candidate = AnalysisCandidate {
+        text: format!(
+            "検索語「{query}」と同じ種類の具体的な別の対象名を、日本語で最大10個、各行に1語だけ出力してください。上位概念、形容詞、説明、番号、記号は不要です。"
+        ),
+        original_text: None,
+        language: None,
+        start_ms: 0,
+        end_ms: 0,
+        model: String::new(),
+        model_version: String::new(),
+        confidence: None,
+        evidence: None,
+    };
+    let response = generate_terms_at("http://127.0.0.1:11434", model, &candidate.text)?;
+    Ok(parse_related_terms(&response))
+}
+
+fn parse_related_terms(response: &str) -> Vec<String> {
+    response
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && line.chars().count() <= 30)
+        .take(10)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn generate_terms_at(base: &str, model: &str, prompt: &str) -> Result<String, OllamaError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .proxy(None)
+        .max_redirects(0)
+        .timeout_global(Some(std::time::Duration::from_secs(120)))
+        .build()
+        .into();
+    let mut response = agent
+        .get(format!("{base}/api/tags"))
+        .call()
+        .map_err(|_| OllamaError::Unavailable)?;
+    let models: Models = response
+        .body_mut()
+        .read_json()
+        .map_err(|_| OllamaError::InvalidResponse)?;
+    let model = models
+        .models
+        .into_iter()
+        .find(|m| {
+            m.name == model || (model.find(':').is_none() && m.name == format!("{model}:latest"))
+        })
+        .ok_or(OllamaError::ModelMissing)?;
+    if !model.is_local() {
+        return Err(OllamaError::RemoteModel);
+    }
+    let mut response = agent
+        .post(format!("{base}/api/generate"))
+        .send_json(json!({"model":model.name,"prompt":prompt,"stream":false}))
+        .map_err(|_| OllamaError::Unavailable)?;
+    let output: Response = response
+        .body_mut()
+        .read_json()
+        .map_err(|_| OllamaError::InvalidResponse)?;
+    if !output.done || output.response.trim().is_empty() {
+        return Err(OllamaError::InvalidResponse);
+    }
+    Ok(output.response)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +349,21 @@ mod tests {
         assert_eq!(candidate.model_version, "abc");
         server.join().unwrap();
     }
+    #[test]
+    fn related_terms_are_bounded_and_ignore_blank_or_oversized_lines() {
+        let input = format!(
+            "\n{}\n{}",
+            "長".repeat(31),
+            (0..15)
+                .map(|i| format!("語{i}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let terms = parse_related_terms(&input);
+        assert_eq!(terms.len(), 10);
+        assert_eq!(terms[0], "語0");
+    }
+
     #[test]
     fn rejects_remote_models_even_when_their_name_looks_local() {
         let remote: Model = serde_json::from_str(r#"{"name":"model:latest","digest":"123","remote_host":"https://example.invalid","details":{"format":"gguf"}}"#).unwrap();

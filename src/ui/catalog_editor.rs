@@ -9,6 +9,7 @@ use crate::{
 };
 use eframe::egui::{self, Ui};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -44,6 +45,7 @@ pub(super) struct CatalogEditor {
     materials: Vec<Material>,
     stored_materials: Vec<StoredMaterial>,
     material_id: Option<i64>,
+    drafts: HashMap<i64, (String, String, String, String)>,
     keywords: String,
     tags: String,
     roles: String,
@@ -84,6 +86,7 @@ impl CatalogEditor {
             materials,
             stored_materials,
             material_id,
+            drafts: HashMap::new(),
             keywords: String::new(),
             tags: String::new(),
             roles: String::new(),
@@ -110,6 +113,10 @@ impl CatalogEditor {
         };
         editor.load_selected();
         Ok(editor)
+    }
+
+    pub fn selected_ollama_model(&self) -> Option<&str> {
+        (!self.ollama_model.is_empty()).then_some(self.ollama_model.as_str())
     }
 
     pub fn count(&self) -> usize {
@@ -168,10 +175,10 @@ impl CatalogEditor {
                     };
                     let message = match record.status {
                         AnalysisStatus::Completed => {
-                            "解析結果を保存しました。解析タブで確認してください。"
+                            "入力支援が完了しました。編集欄に取り込んで確認してください。"
                         }
                         AnalysisStatus::Interrupted => "解析を中断しました。",
-                        _ => "解析に失敗しました。解析タブで理由を確認してください。",
+                        _ => "解析に失敗しました。編集で理由を確認してください。",
                     };
                     self.message = match self.store.save_analysis(id, &record) {
                         Ok(()) => Some((state, message.into())),
@@ -209,27 +216,19 @@ impl CatalogEditor {
         }
         ui.horizontal(|ui| {
             Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Metadata, "手入力");
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "解析");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Metadata, "編集");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "設定");
         });
         ui.add_space(theme::SPACE_SM);
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
-            EditorTab::Analysis => self.analysis_controls(ui),
+            EditorTab::Analysis => self.settings_controls(ui),
         }
     }
 
-    fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label(theme::body(
-            "選択中の素材を文字起こしします（結果は手入力の情報と別に保存します）",
-        ));
-        ui.label(theme::body(
-            "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
-        ));
-        ui.label(theme::detail_muted(
-            "① FFmpeg で音声を変換 → ② Whisper で文字起こし → ③ Ollama で説明候補を作成（任意）",
-        ));
+    fn settings_controls(&mut self, ui: &mut Ui) -> bool {
+        ui.label(theme::body("入力支援に使う方式とモデルを設定します。"));
         let previous = self.material_id;
         ui.horizontal(|ui| {
             theme::form_label(ui, "素材");
@@ -251,6 +250,7 @@ impl CatalogEditor {
                 });
         });
         if previous != self.material_id {
+            self.remember_draft(previous);
             self.load_selected();
         }
         ui.horizontal(|ui| {
@@ -441,6 +441,11 @@ impl CatalogEditor {
                 });
             }
         });
+        self.show_message(ui);
+        false
+    }
+
+    fn analysis_controls(&mut self, ui: &mut Ui) {
         if self.speech_recognition {
             if !executable_exists("ffmpeg") {
                 theme::state_message(
@@ -528,7 +533,7 @@ impl CatalogEditor {
                     Err(error) => {
                         self.message = Some((theme::State::Error, error.to_string()));
                         self.show_message(ui);
-                        return false;
+                        return;
                     }
                 };
                 if !self.force_reanalysis
@@ -539,7 +544,7 @@ impl CatalogEditor {
                     })
                 {
                     self.message = Some((theme::State::Ready, "同じ素材と設定の解析結果を表示しています。再実行には「同じ素材と設定でも再解析する」を選んでください。".into()));
-                    return false;
+                    return;
                 }
                 let had_previous = previous.is_some();
                 let mut record = previous.unwrap_or_else(|| AnalysisRecord {
@@ -591,7 +596,7 @@ impl CatalogEditor {
                                     } else {
                                         record.fingerprint = fingerprint;
                                         record.configuration = configuration;
-                                        record.candidates = candidates;
+                                        record.candidates.extend(candidates);
                                         record.status = AnalysisStatus::Completed;
                                     }
                                 }
@@ -619,123 +624,57 @@ impl CatalogEditor {
         }
         if let Some(id) = self.material_id {
             match self.store.analysis(id) {
-                Ok(Some(mut record)) => {
-                    if record.status == AnalysisStatus::Running && self.analysis_task.is_none() {
-                        ui.label(theme::body(
-                            "前回の解析は完了していません。必要なら再解析してください。",
-                        ));
-                    }
+                Ok(Some(record)) => {
                     if let Some(error) = &record.error {
-                        ui.label(theme::body(error));
+                        theme::state_message(ui, theme::State::Error, error);
                     }
-                    if self
-                        .materials
+                    let transcript = record
+                        .candidates
                         .iter()
-                        .find(|m| m.id == id)
-                        .is_some_and(|m| m.fingerprint != record.fingerprint)
-                    {
-                        ui.label(theme::body("素材が変更されています。再解析してください。"));
-                    }
-                    if !record.candidates.is_empty() {
-                        ui.separator();
-                        if let Some(material) = self.materials.iter().find(|m| m.id == id) {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(theme::section_title(format!(
-                                    "文字起こし結果 — {}",
-                                    material.source_path
-                                )));
-                                theme::ready_badge(ui, "保存済み");
-                            });
+                        .filter(|candidate| {
+                            candidate.evidence.as_deref() != Some("文字起こし候補の要約")
+                        })
+                        .map(|candidate| candidate.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let explanation = record
+                        .candidates
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.evidence.as_deref() == Some("文字起こし候補の要約")
+                        })
+                        .map(|candidate| markdown_plain_text(&candidate.text))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    ui.label(theme::detail_muted(
+                        "取り込みは既存の入力に追記します。確認・編集してから保存してください。",
+                    ));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .add_enabled(
+                                !transcript.is_empty(),
+                                egui::Button::new("文字起こしを検索語句に追記"),
+                            )
+                            .clicked()
+                        {
+                            append_text(&mut self.keywords, &transcript, ", ");
                         }
-                    }
-                    let mut changed = false;
-                    for (index, candidate) in record.candidates.iter_mut().enumerate() {
-                        changed |= ui
-                            .push_id(index, |ui| {
-                                let is_summary =
-                                    candidate.evidence.as_deref() == Some("文字起こし候補の要約");
-                                if let Some(evidence) = candidate.evidence.as_deref()
-                                    && evidence != "音声からの文字起こし候補"
-                                {
-                                    let label = if evidence == "文字起こし候補の要約" {
-                                        "文字起こしの要約"
-                                    } else {
-                                        evidence
-                                    };
-                                    ui.label(theme::detail(label));
-                                }
-                                let edited = if is_summary {
-                                    ui.add(
-                                        egui::Label::new(theme::body(markdown_plain_text(
-                                            &candidate.text,
-                                        )))
-                                        .selectable(true)
-                                        .wrap(),
-                                    );
-                                    false
-                                } else {
-                                    ui.add_enabled(
-                                        self.analysis_task.is_none(),
-                                        egui::TextEdit::multiline(&mut candidate.text),
-                                    )
-                                    .changed()
-                                };
-                                if let Some(original) = &candidate.original_text
-                                    && original != &candidate.text
-                                {
-                                    ui.label(theme::detail_muted(format!(
-                                        "当初の生成結果: {original}"
-                                    )));
-                                }
-                                edited
-                            })
-                            .inner;
-                    }
-                    if !record.candidates.is_empty() {
-                        ui.collapsing("解析の詳細", |ui| {
-                            let mut models = Vec::new();
-                            let mut languages = Vec::new();
-                            for candidate in &record.candidates {
-                                let label = if candidate.evidence.as_deref()
-                                    == Some("文字起こし候補の要約")
-                                {
-                                    "テキスト解析モデル"
-                                } else {
-                                    "音声認識モデル"
-                                };
-                                let model = (label, candidate.model.as_str());
-                                if !models.contains(&model) {
-                                    ui.label(theme::detail(format!(
-                                        "{label}: {}",
-                                        candidate.model
-                                    )));
-                                    models.push(model);
-                                }
-                                if let Some(language) = candidate.language.as_deref()
-                                    && !languages.contains(&language)
-                                {
-                                    let name = match language {
-                                        "ja" => "日本語",
-                                        "ko" => "韓国語",
-                                        "en" => "英語",
-                                        _ => language,
-                                    };
-                                    ui.label(theme::detail(format!("言語候補: {name}")));
-                                    languages.push(language);
-                                }
-                            }
-                        });
-                    }
-                    if changed && let Err(e) = self.store.save_analysis(id, &record) {
-                        self.message = Some((theme::State::Error, e.to_string()));
-                    }
+                        if ui
+                            .add_enabled(
+                                !explanation.is_empty(),
+                                egui::Button::new("Ollama の説明をメモに追記"),
+                            )
+                            .clicked()
+                        {
+                            append_text(&mut self.note, &explanation, " ");
+                        }
+                    });
                 }
-                Err(e) => self.message = Some((theme::State::Error, e.to_string())),
+                Err(error) => self.message = Some((theme::State::Error, error.to_string())),
                 _ => {}
             }
         }
         self.show_message(ui);
-        false
     }
 
     fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
@@ -805,6 +744,7 @@ impl CatalogEditor {
             },
         );
         if let Some(id) = selection {
+            self.remember_draft(self.material_id);
             self.material_id = Some(id);
             self.load_selected();
             self.active_tab = EditorTab::Metadata;
@@ -815,7 +755,7 @@ impl CatalogEditor {
 
     fn metadata_controls(&mut self, ui: &mut Ui) -> bool {
         ui.label(theme::body(
-            "検索語句・タグ・役割は、この素材に保存する情報です。",
+            "未保存の入力は 02・03 に移動しても保持されます。01 に戻って保存してください。",
         ));
         let selected = self.material_id;
         egui::ComboBox::from_id_salt("material")
@@ -836,6 +776,7 @@ impl CatalogEditor {
                 }
             });
         if selected != self.material_id {
+            self.remember_draft(selected);
             self.load_selected();
         }
         ui.separator();
@@ -854,6 +795,11 @@ impl CatalogEditor {
         ui.label(theme::detail_muted(
             "複数の検索語句・タグ・役割はカンマ区切りです。",
         ));
+        ui.separator();
+        ui.label(theme::detail_muted(
+            "設定タブで方式を選び、文字起こしを実行できます。",
+        ));
+        self.analysis_controls(ui);
         let selected = self.material_id.is_some();
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
@@ -889,17 +835,42 @@ impl CatalogEditor {
         changed
     }
 
+    fn remember_draft(&mut self, id: Option<i64>) {
+        if let Some(id) = id {
+            self.drafts.insert(
+                id,
+                (
+                    self.keywords.clone(),
+                    self.tags.clone(),
+                    self.roles.clone(),
+                    self.note.clone(),
+                ),
+            );
+        }
+    }
+
     fn load_selected(&mut self) {
         let Some(id) = self.material_id else {
             return;
         };
-        let metadata = self
-            .stored_materials
-            .iter()
-            .find(|material| material.id == id)
-            .map(|material| &material.metadata)
-            .cloned()
-            .unwrap_or_default();
+        if let Some((keywords, tags, roles, note)) = self.drafts.get(&id) {
+            self.keywords.clone_from(keywords);
+            self.tags.clone_from(tags);
+            self.roles.clone_from(roles);
+            self.note.clone_from(note);
+            return;
+        }
+        let metadata = match self.store.search(&SearchFilter::default()) {
+            Ok(materials) => materials
+                .into_iter()
+                .find(|material| material.id == id)
+                .map(|material| material.metadata)
+                .unwrap_or_default(),
+            Err(error) => {
+                self.message = Some((theme::State::Error, error.to_string()));
+                return;
+            }
+        };
         self.keywords = metadata.keywords.join(", ");
         self.tags = metadata.tags.join(", ");
         self.roles = metadata.roles.join(", ");
@@ -924,6 +895,7 @@ impl CatalogEditor {
             note: self.note.clone(),
         };
         self.store.save_metadata(material_id, &metadata)?;
+        self.drafts.remove(&material_id);
         self.refresh()?;
         self.load_selected();
         Ok(())
@@ -953,6 +925,13 @@ impl Drop for CatalogEditor {
             let _ = self.store.save_analysis(id, &record);
         }
     }
+}
+
+fn append_text(target: &mut String, value: &str, separator: &str) {
+    if !target.trim().is_empty() {
+        target.push_str(separator);
+    }
+    target.push_str(value.trim());
 }
 
 fn split(text: &str) -> Vec<String> {
@@ -1047,6 +1026,78 @@ mod tests {
             String::from_utf8_lossy(&result.stdout)
         );
     }
+    #[test]
+    fn switching_materials_keeps_unsaved_input_and_save_makes_it_searchable() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        std::fs::write(materials.join("b.wav"), b"b").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::new(store).unwrap();
+        let first = editor.material_id;
+        editor.keywords = "既存の入力".into();
+        append_text(&mut editor.keywords, "文字起こし", ", ");
+        editor.roles = "導入".into();
+        editor.remember_draft(first);
+        editor.material_id = Some(editor.materials[1].id);
+        editor.load_selected();
+        editor.remember_draft(editor.material_id);
+        editor.material_id = first;
+        editor.load_selected();
+        assert_eq!(editor.keywords, "既存の入力, 文字起こし");
+        editor.save().unwrap();
+        assert_eq!(
+            create_plan(
+                &editor.store.candidate_catalog().unwrap(),
+                "導入: 文字起こし"
+            )
+            .slots[0]
+                .candidates
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_analysis_preserves_unsaved_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::new(store).unwrap();
+        editor.keywords = "編集中".into();
+        editor.note = "残すメモ".into();
+        let (sender, receiver) = mpsc::channel();
+        editor.analysis_task = Some(receiver);
+        sender
+            .send((
+                editor.material_id.unwrap(),
+                AnalysisRecord {
+                    fingerprint: "test".into(),
+                    configuration: "test".into(),
+                    status: AnalysisStatus::Failed,
+                    candidates: vec![],
+                    error: Some("失敗".into()),
+                },
+            ))
+            .unwrap();
+        let context = egui::Context::default();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                editor.controls(ui);
+            });
+        });
+        assert_eq!(editor.keywords, "編集中");
+        assert_eq!(editor.note, "残すメモ");
+        assert!(editor.message().is_some());
+    }
+
     #[test]
     fn summary_markdown_is_readable_without_raw_formatting() {
         let text =
