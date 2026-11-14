@@ -44,6 +44,13 @@ pub fn render(ffmpeg: &Path, inputs: &[PathBuf], output: &Path) -> Result<(), St
     if inputs.is_empty() {
         return Err("書き出す素材がありません。".into());
     }
+    if let Ok(existing) = output.canonicalize()
+        && inputs
+            .iter()
+            .any(|input| input.canonicalize().ok().as_ref() == Some(&existing))
+    {
+        return Err("書き出し先に使用中の素材は指定できません。".into());
+    }
     let parent = output.parent().ok_or("保存先が不正です。")?;
     let temp = tempfile::Builder::new()
         .suffix(".wav")
@@ -80,7 +87,7 @@ pub fn render(ffmpeg: &Path, inputs: &[PathBuf], output: &Path) -> Result<(), St
         .stdout(Stdio::null())
         .output()
         .map_err(|e| {
-            format!("FFmpegを起動できません: {e}。FFmpegを導入し実行ファイルを指定してください。")
+            format!("FFmpegを起動できません: {e}。FFmpegを導入し、PATH を設定してください。")
         })?;
     if !result.status.success() {
         return Err(format!(
@@ -88,12 +95,8 @@ pub fn render(ffmpeg: &Path, inputs: &[PathBuf], output: &Path) -> Result<(), St
             String::from_utf8_lossy(&result.stderr).trim()
         ));
     }
-    temp.persist_noclobber(output).map_err(|e| {
-        format!(
-            "保存できません（既存ファイルは上書きしません）: {}",
-            e.error
-        )
-    })?;
+    temp.persist(output)
+        .map_err(|e| format!("保存できません: {}", e.error))?;
     Ok(())
 }
 
@@ -154,6 +157,16 @@ mod tests {
     }
 
     #[test]
+    fn output_cannot_replace_an_input_material() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("material.wav");
+        std::fs::write(&input, b"original").unwrap();
+        let error = render(Path::new("ffmpeg"), std::slice::from_ref(&input), &input).unwrap_err();
+        assert!(error.contains("素材"));
+        assert_eq!(std::fs::read(&input).unwrap(), b"original");
+    }
+
+    #[test]
     fn missing_ffmpeg_does_not_create_output() {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("output.wav");
@@ -180,15 +193,23 @@ mod tests {
         .unwrap();
         assert!(output.metadata().unwrap().len() > 44);
         let original = std::fs::read(&output).unwrap();
+        render(
+            Path::new("ffmpeg"),
+            &[root.join("01-tekkaman.wav")],
+            &output,
+        )
+        .unwrap();
+        let replaced = std::fs::read(&output).unwrap();
+        assert_ne!(replaced, original);
         assert!(
             render(
                 Path::new("ffmpeg"),
-                &[root.join("01-tekkaman.wav")],
+                &[root.join("01-tekkaman.wav"), dir.path().join("missing.wav")],
                 &output
             )
             .is_err()
         );
-        assert_eq!(std::fs::read(&output).unwrap(), original);
+        assert_eq!(std::fs::read(&output).unwrap(), replaced);
         let failed = dir.path().join("failed.wav");
         assert!(
             render(
