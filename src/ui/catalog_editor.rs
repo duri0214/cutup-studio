@@ -219,22 +219,25 @@ impl CatalogEditor {
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
         ));
         let previous = self.material_id;
-        egui::ComboBox::from_id_salt("analysis_material")
-            .selected_text(
-                self.materials
-                    .iter()
-                    .find(|m| Some(m.id) == self.material_id)
-                    .map_or("素材なし", |m| m.source_path.as_str()),
-            )
-            .show_ui(ui, |ui| {
-                for material in &self.materials {
-                    ui.selectable_value(
-                        &mut self.material_id,
-                        Some(material.id),
-                        &material.source_path,
-                    );
-                }
-            });
+        ui.horizontal(|ui| {
+            ui.label(theme::detail("素材"));
+            egui::ComboBox::from_id_salt("analysis_material")
+                .selected_text(
+                    self.materials
+                        .iter()
+                        .find(|m| Some(m.id) == self.material_id)
+                        .map_or("素材なし", |m| m.source_path.as_str()),
+                )
+                .show_ui(ui, |ui| {
+                    for material in &self.materials {
+                        ui.selectable_value(
+                            &mut self.material_id,
+                            Some(material.id),
+                            &material.source_path,
+                        );
+                    }
+                });
+        });
         if previous != self.material_id {
             self.load_selected();
         }
