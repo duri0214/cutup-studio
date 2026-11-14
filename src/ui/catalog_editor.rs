@@ -441,7 +441,10 @@ impl CatalogEditor {
             ui.label(theme::body("必要な実行ファイルまたは音声認識モデルが見つかりません。「実行ファイルとモデルの設定」から選択してください。"));
         }
         if self.analysis_task.is_some() {
-            ui.label(theme::body("解析中…"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(16.0).color(theme::ACCENT));
+                ui.label(theme::body("解析中…"));
+            });
             ui.label(theme::detail_muted(
                 "Ollama 実行中の中断は応答を待って反映されます。",
             ));
