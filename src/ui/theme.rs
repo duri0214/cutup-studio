@@ -183,6 +183,7 @@ pub fn form_label(ui: &mut Ui, text: &str) {
         Vec2::new(FORM_LABEL_WIDTH, INPUT_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            ui.set_min_width(FORM_LABEL_WIDTH);
             ui.label(detail(text));
         },
     );
@@ -682,6 +683,26 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
 
 #[cfg(test)]
 mod tests {
+    use eframe::egui;
+
+    #[test]
+    fn form_labels_keep_following_controls_aligned_for_different_lengths() {
+        let context = egui::Context::default();
+        let mut positions = Vec::new();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for label in ["A", "Longer label"] {
+                    ui.horizontal(|ui| {
+                        super::form_label(ui, label);
+                        positions.push(ui.cursor().left());
+                    });
+                }
+            });
+        });
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[0], positions[1]);
+    }
+
     #[test]
     fn ollama_logo_rasterizes_in_a_color_that_accepts_ui_tint() {
         let logo = egui_extras::image::load_svg_bytes(
