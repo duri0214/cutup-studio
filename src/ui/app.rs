@@ -14,13 +14,29 @@ use crate::{
             Candidate, Catalog, CompositionRecipe, CompositionRecipeSlot, Plan, RecipeSelection,
         },
     },
-    infra::sqlite_catalog::{CatalogError, SqliteCatalog},
+    infra::{
+        local_ai::ollama,
+        sqlite_catalog::{CatalogError, SqliteCatalog},
+    },
 };
 
-use super::catalog_editor::{CatalogEditor, PANEL_WIDTH, PanelEvent};
+use super::catalog_editor::{CatalogEditor, EditorSettings, PANEL_WIDTH, PanelEvent};
 use super::theme;
 
 type CatalogTask = Receiver<Result<(SqliteCatalog, PathBuf, ScanReport), CatalogError>>;
+type RelatedTask = Receiver<(
+    String,
+    String,
+    String,
+    Result<Vec<String>, ollama::OllamaError>,
+)>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Section {
+    Catalog,
+    Guide,
+    Composition,
+}
 
 #[derive(Clone)]
 struct GuideInput {
@@ -33,6 +49,7 @@ pub struct StudioApp {
     catalog_path: Option<PathBuf>,
     demo_mode: bool,
     editor: Option<CatalogEditor>,
+    editor_settings: EditorSettings,
     catalog_task: Option<CatalogTask>,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
@@ -44,16 +61,24 @@ pub struct StudioApp {
     export_error: Option<String>,
     saved_composition: Option<CompositionRecipe>,
     confirm_close: bool,
+    confirm_close_metadata: bool,
+    active_section: Section,
+    related_task: Option<RelatedTask>,
 }
 
 impl StudioApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
         theme::install(&creation_context.egui_ctx);
+        let editor_settings = creation_context
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "editor_settings"))
+            .unwrap_or_default();
         Self {
             catalog: None,
             catalog_path: None,
             demo_mode: false,
             editor: None,
+            editor_settings,
             catalog_task: None,
             guide_inputs: Vec::new(),
             plan: None,
@@ -64,6 +89,9 @@ impl StudioApp {
             export_error: None,
             saved_composition: None,
             confirm_close: false,
+            confirm_close_metadata: false,
+            active_section: Section::Catalog,
+            related_task: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
@@ -93,6 +121,10 @@ impl StudioApp {
     }
 
     fn clear_active_catalog(&mut self) {
+        if let Some(editor) = &self.editor {
+            self.editor_settings = editor.settings();
+        }
+        self.related_task = None;
         self.catalog = None;
         self.catalog_path = None;
         self.demo_mode = false;
@@ -189,12 +221,14 @@ impl StudioApp {
             }
         };
         self.catalog_task = None;
-        match result
-            .and_then(|(store, path, report)| Ok((CatalogEditor::new(store)?, path, report)))
-        {
+        let settings = self.editor_settings.clone();
+        match result.and_then(|(store, path, report)| {
+            Ok((CatalogEditor::with_settings(store, settings)?, path, report))
+        }) {
             Ok((mut editor, path, report)) => {
                 let total = editor.count();
                 editor.open = total > 0;
+                self.active_section = Section::Catalog;
                 self.editor = Some(editor);
                 self.catalog_path = Some(path);
                 self.reload_catalog();
@@ -430,7 +464,8 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
-        if self.status.starts_with("EXPORT ERROR")
+        if self.status.starts_with("RELATED ERROR")
+            || self.status.starts_with("EXPORT ERROR")
             || self.status.starts_with("CATALOG ERROR")
             || self.status.starts_with("CATALOG EXISTS")
         {
@@ -489,7 +524,20 @@ impl StudioApp {
 
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
         let (signal, _) = self.system_status();
-        theme::panel().show(ui, |ui| {
+        theme::section_panel(self.active_section == Section::Catalog).show(ui, |ui| {
+            if theme::section_tab(
+                ui,
+                "01 の情報を表示",
+                self.active_section == Section::Catalog,
+                150.0,
+            )
+            .clicked()
+            {
+                self.active_section = Section::Catalog;
+                if let Some(editor) = &mut self.editor {
+                    editor.open = true;
+                }
+            }
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
             ui.label(theme::detail_muted(
                 "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
@@ -555,6 +603,7 @@ impl StudioApp {
                     && let Some(editor) = &mut self.editor
                 {
                     editor.open = true;
+                    self.active_section = Section::Catalog;
                 }
             });
             if let Some(catalog) = &self.catalog {
@@ -584,8 +633,14 @@ impl StudioApp {
         let mut guide_changed = false;
         let mut reset_selections = false;
         let mut focused_guide = None;
-        theme::panel().show(ui, |ui| {
+        theme::section_panel(self.active_section == Section::Guide).show(ui, |ui| {
+            if theme::section_tab(ui, "02 の候補を表示", self.active_section == Section::Guide, 150.0).clicked() {
+                self.active_section = Section::Guide;
+            }
             section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
+            if self.status.starts_with("RELATED ERROR") {
+                theme::state_message(ui, theme::State::Error, &self.status);
+            }
             ui.label(theme::detail_muted(
                 "役割を選び、探したい語句・タグを入力します。",
             ));
@@ -597,10 +652,26 @@ impl StudioApp {
                 for role in &available_roles {
                     if theme::role_badge_button(ui, role).clicked() {
                         role_to_add = Some(role.clone());
+                        self.active_section = Section::Guide;
                     }
                 }
             });
             ui.add_space(theme::SPACE_XS);
+            let model = self.editor.as_ref().and_then(CatalogEditor::selected_ollama_model).map(str::to_owned);
+            let slot = self.active_slot.and_then(|index| self.plan.as_ref()?.slots.get(index)).map(|s| s.slot.clone());
+            if ui.add_enabled(model.is_some() && slot.is_some() && self.related_task.is_none(), egui::Button::new("Ollama で関連素材を探す")).clicked()
+                && let (Some(model), Some(slot)) = (model, slot) {
+                let (sender, receiver) = mpsc::channel();
+                self.related_task = Some(receiver);
+                self.status = "関連語を生成しています。従来の候補も利用できます。".into();
+                self.active_section = Section::Guide;
+                ui.ctx().request_repaint();
+                std::thread::spawn(move || {
+                    let result = ollama::related_terms(&model, &slot.query);
+                    let _ = sender.send((slot.id, slot.role, slot.query, result));
+                });
+            }
+            ui.label(theme::detail_muted("関連素材の探索には、01 の設定で Ollama モデルを選んでください。"));
             let mut remove_index = None;
             let mut drag_started = None;
             let mut drag_stopped = false;
@@ -609,24 +680,34 @@ impl StudioApp {
             let can_remove = self.guide_inputs.len() > 1;
             let mut populated_order = 0;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
-                let label = if guide_input.query.trim().is_empty() {
-                    guide_input.role.clone()
+                let slot_index = if guide_input.query.trim().is_empty() {
+                    None
                 } else {
                     populated_order += 1;
-                    format!("{populated_order:02} {}", guide_input.role)
+                    Some(populated_order - 1)
                 };
+                let label = slot_index.map_or_else(
+                    || guide_input.role.clone(),
+                    |slot_index| format!("{:02} {}", slot_index + 1, guide_input.role),
+                );
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
                     if drag_response.drag_started() {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    theme::role_label(ui, &label);
+                    if theme::role_label(ui, &label, slot_index == self.active_slot).clicked() {
+                        focused_guide = Some(index);
+                        self.active_section = Section::Guide;
+                        ui.ctx().request_repaint();
+                    }
                     let response =
                         theme::text_input(ui, &mut guide_input.query, "探したい語句・タグ", 330.0);
                     guide_changed |= response.changed();
-                    if response.gained_focus() || response.changed() {
+                    if response.clicked() || response.gained_focus() || response.changed() {
                         focused_guide = Some(index);
+                        self.active_section = Section::Guide;
+                        ui.ctx().request_repaint();
                     }
                     if can_remove
                         && theme::icon_button(
@@ -654,11 +735,13 @@ impl StudioApp {
                 }
             }
             if let Some(index) = remove_index {
+                self.active_section = Section::Guide;
                 self.guide_inputs.remove(index);
                 guide_changed = true;
                 reset_selections = true;
             }
             if let Some(index) = drag_started {
+                self.active_section = Section::Guide;
                 self.dragged_guide_index = Some(index);
             }
             if drag_stopped {
@@ -899,7 +982,10 @@ impl StudioApp {
         let mut save_requested = false;
         let mut load_requested = false;
         let mut export_requested = false;
-        theme::panel().show(ui, |ui| {
+        theme::section_panel(self.active_section == Section::Composition).show(ui, |ui| {
+            if theme::section_tab(ui, "03 の情報を表示", self.active_section == Section::Composition, 150.0).clicked() {
+                self.active_section = Section::Composition;
+            }
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
                 ui.label(theme::section_title("03 / COMPOSITION"));
@@ -913,6 +999,7 @@ impl StudioApp {
                         .inner
                         .clicked()
                     {
+                        self.active_section = Section::Composition;
                         save_requested = true;
                     }
                     if ui
@@ -922,6 +1009,7 @@ impl StudioApp {
                         .inner
                         .clicked()
                     {
+                        self.active_section = Section::Composition;
                         load_requested = true;
                     }
                     theme::selection_count(ui, selected_count, entries.len());
@@ -961,6 +1049,7 @@ impl StudioApp {
                 .inner
                 .clicked()
             {
+                self.active_section = Section::Composition;
                 export_requested = true;
             }
         });
@@ -977,15 +1066,116 @@ impl StudioApp {
 }
 
 impl eframe::App for StudioApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Some(editor) = &self.editor {
+            self.editor_settings = editor.settings();
+        }
+        eframe::set_value(storage, "editor_settings", &self.editor_settings);
+    }
+
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        if context.input(|input| input.viewport().close_requested()) && self.composition_is_dirty()
-        {
-            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.confirm_close = true;
+        if context.input(|input| input.viewport().close_requested()) {
+            let metadata_dirty = self
+                .editor
+                .as_ref()
+                .map(CatalogEditor::has_unsaved_metadata)
+                .transpose();
+            match metadata_dirty {
+                Ok(Some(true)) => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.confirm_close_metadata = true;
+                }
+                Err(error) => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.status =
+                        format!("CATALOG ERROR — 未保存の素材情報を確認できません: {error}");
+                }
+                _ if self.composition_is_dirty() => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.confirm_close = true;
+                }
+                _ => {}
+            }
         }
         self.poll_catalog_task();
         self.poll_export();
-        if self.confirm_close {
+        if let Some(task) = &self.related_task {
+            match task.try_recv() {
+                Ok((id, role, query, result)) => {
+                    self.related_task = None;
+                    match result {
+                        Ok(terms) => {
+                            if let (Some(catalog), Some(plan)) = (&self.catalog, &mut self.plan)
+                                && let Some(slot) = plan.slots.iter_mut().find(|slot| {
+                                    slot.slot.id == id
+                                        && slot.slot.role == role
+                                        && slot.slot.query == query
+                                })
+                            {
+                                add_related_candidates(catalog, slot, &terms);
+                                self.status = "関連語に一致する素材を候補に追加しました。採用する素材を選んでください。".into();
+                            }
+                        }
+                        Err(error) => {
+                            self.status = format!(
+                                "RELATED ERROR — 関連素材を探せませんでした: {error}。通常の候補は利用できます。"
+                            )
+                        }
+                    }
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.related_task = None;
+                    self.status =
+                        "RELATED ERROR — 関連素材の探索が中断されました。通常の候補は利用できます。".into();
+                }
+                Err(TryRecvError::Empty) => {
+                    context.request_repaint_after(std::time::Duration::from_millis(200))
+                }
+            }
+        }
+        if self.confirm_close_metadata {
+            egui::Modal::new(egui::Id::new("confirm_exit_catalog_editor")).show(context, |ui| {
+                ui.label(theme::section_title("未保存の素材情報"));
+                ui.label("保存していない素材情報があります。終了前に保存しますか？");
+                if self.status.starts_with("CATALOG ERROR") {
+                    theme::state_message(ui, theme::State::Error, &self.status);
+                }
+                ui.horizontal(|ui| {
+                    let save =
+                        theme::button(ui, "保存して終了", theme::ButtonKind::Primary).clicked();
+                    let discard =
+                        theme::button(ui, "保存せず終了", theme::ButtonKind::Normal).clicked();
+                    if (save || discard)
+                        && let Some(editor) = &mut self.editor
+                    {
+                        let result = if save {
+                            editor.save_all_drafts()
+                        } else {
+                            editor.discard_changes();
+                            Ok(())
+                        };
+                        match result {
+                            Ok(()) => {
+                                self.confirm_close_metadata = false;
+                                if self.composition_is_dirty() {
+                                    self.confirm_close = true;
+                                } else {
+                                    context.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                            }
+                            Err(error) => {
+                                self.status =
+                                    format!("CATALOG ERROR — 素材情報を保存できません: {error}")
+                            }
+                        }
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close_metadata = false;
+                    }
+                });
+            });
+        }
+        if self.confirm_close && !self.confirm_close_metadata {
             egui::Modal::new(egui::Id::new("confirm_close_composition")).show(context, |ui| {
                 ui.label(theme::section_title("未保存の構成"));
                 ui.label("構成に保存していない変更があります。閉じると変更は失われます。");
@@ -1030,7 +1220,7 @@ impl eframe::App for StudioApp {
                 if let Some((state, message)) = self
                     .editor
                     .as_ref()
-                    .filter(|editor| editor.open)
+                    .filter(|editor| editor.open && self.active_section == Section::Catalog)
                     .and_then(CatalogEditor::message)
                 {
                     theme::state_message(ui, state, message);
@@ -1045,7 +1235,7 @@ impl eframe::App for StudioApp {
             .frame(theme::content_frame())
             .show(context, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if registering {
+                    if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =
                                 editor.message().map(|(_, text)| text.to_owned());
@@ -1055,8 +1245,15 @@ impl eframe::App for StudioApp {
                                 context.request_repaint();
                             }
                         }
-                    } else if self.plan.is_some() {
+                    } else if self.active_section == Section::Guide {
                         self.show_candidate_pane(ui);
+                    } else if self.active_section == Section::Composition {
+                        theme::panel().show(ui, |ui| {
+                            ui.label(theme::section_title("03 / COMPOSITION"));
+                            ui.label(theme::body(
+                                "構成の保存・読み込みと書き出しは左の 03 で操作します。",
+                            ));
+                        });
                     } else {
                         self.show_info_pane(ui);
                     }
@@ -1065,6 +1262,7 @@ impl eframe::App for StudioApp {
         match panel_event {
             PanelEvent::None => {}
             PanelEvent::Closed => {
+                self.active_section = Section::Guide;
                 self.status =
                     "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材の情報を登録」で右ペインを開けます。"
                         .into();
@@ -1089,6 +1287,28 @@ impl eframe::App for StudioApp {
                     ui.add_enabled_ui(!busy, |ui| self.show_stage(ui));
                 });
             });
+    }
+}
+
+fn add_related_candidates(
+    catalog: &Catalog,
+    slot: &mut crate::domain::valueobject::SlotPlan,
+    terms: &[String],
+) {
+    for term in terms {
+        let related = create_plan(catalog, &format!("{}: {}", slot.slot.role, term));
+        for mut candidate in related.slots.into_iter().flat_map(|s| s.candidates) {
+            if !slot
+                .candidates
+                .iter()
+                .any(|existing| existing.material_id == candidate.material_id)
+            {
+                candidate
+                    .reasons
+                    .insert(0, format!("Ollama の関連語「{term}」に一致"));
+                slot.candidates.push(candidate);
+            }
+        }
     }
 }
 
@@ -1182,6 +1402,7 @@ mod tests {
             catalog_path: None,
             demo_mode: false,
             editor: None,
+            editor_settings: EditorSettings::default(),
             catalog_task: None,
             guide_inputs: vec![],
             plan: Some(Plan {
@@ -1203,6 +1424,9 @@ mod tests {
             export_error: None,
             saved_composition: None,
             confirm_close: false,
+            confirm_close_metadata: false,
+            active_section: Section::Catalog,
+            related_task: None,
         };
         app.selections
             .insert("slot-1".into(), candidate("1", "apple.wav"));
@@ -1219,6 +1443,69 @@ mod tests {
         app.selections.clear();
         assert!(app.export_inputs().unwrap_err().contains("未選択"));
     }
+    #[test]
+    fn related_terms_find_catalog_evidence_without_selecting_it() {
+        use crate::domain::valueobject::CatalogMaterial;
+        let catalog = Catalog {
+            schema_version: 1,
+            material_root: String::new(),
+            materials: vec![CatalogMaterial {
+                id: "pear".into(),
+                source_path: "pear.wav".into(),
+                keywords: vec!["梨".into()],
+                tags: vec![],
+                roles: vec!["導入".into()],
+                note: String::new(),
+            }],
+        };
+        let mut plan = create_plan(&catalog, "導入: りんご");
+        assert!(plan.slots[0].candidates.is_empty());
+        add_related_candidates(&catalog, &mut plan.slots[0], &["梨".into()]);
+        assert_eq!(plan.slots[0].candidates.len(), 1);
+        assert!(
+            plan.slots[0].candidates[0]
+                .reasons
+                .iter()
+                .any(|r| r.contains("検索語句") && r.contains("梨"))
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local Ollama and gemma4:e2b"]
+    fn measure_related_search_over_5000_materials() {
+        use crate::domain::valueobject::CatalogMaterial;
+        let catalog = Catalog {
+            schema_version: 1,
+            material_root: String::new(),
+            materials: (0..5000)
+                .map(|i| CatalogMaterial {
+                    id: i.to_string(),
+                    source_path: format!("{i}.wav"),
+                    keywords: vec![if i == 4999 { "梨" } else { "無関係" }.into()],
+                    tags: vec![],
+                    roles: vec!["導入".into()],
+                    note: String::new(),
+                })
+                .collect(),
+        };
+        let start = std::time::Instant::now();
+        let terms = ollama::related_terms("gemma4:e2b", "りんご").unwrap();
+        let generated = start.elapsed();
+        let mut plan = create_plan(&catalog, "導入: りんご");
+        add_related_candidates(&catalog, &mut plan.slots[0], &terms);
+        println!(
+            "generation={generated:?} total={:?} terms={terms:?} candidates={}",
+            start.elapsed(),
+            plan.slots[0].candidates.len()
+        );
+        assert!(
+            plan.slots[0]
+                .candidates
+                .iter()
+                .any(|candidate| candidate.material_id == "4999")
+        );
+    }
+
     #[test]
     fn input_focus_maps_to_populated_slot_even_with_empty_rows() {
         let inputs = vec![

@@ -8,7 +8,9 @@ use crate::{
     ui::theme,
 };
 use eframe::egui::{self, Ui};
+use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -25,6 +27,34 @@ enum EditorTab {
 }
 
 pub(super) const PANEL_WIDTH: f32 = 640.0;
+type AnalysisTask = Receiver<(
+    i64,
+    AnalysisRecord,
+    String,
+    Option<ollama::MetadataSuggestions>,
+)>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct EditorSettings {
+    whisper_path: String,
+    model_path: String,
+    ollama_model: String,
+    speech_recognition: bool,
+    speech_language: SpeechLanguage,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            whisper_path: default_whisper_path("Release/whisper-cli.exe"),
+            model_path: default_whisper_path("ggml-tiny.bin"),
+            ollama_model: String::new(),
+            speech_recognition: false,
+            speech_language: SpeechLanguage::Auto,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PanelEvent {
@@ -44,6 +74,7 @@ pub(super) struct CatalogEditor {
     materials: Vec<Material>,
     stored_materials: Vec<StoredMaterial>,
     material_id: Option<i64>,
+    drafts: HashMap<i64, (String, String, String, String)>,
     keywords: String,
     tags: String,
     roles: String,
@@ -63,14 +94,17 @@ pub(super) struct CatalogEditor {
     ollama_start_requested: bool,
     speech_recognition: bool,
     speech_language: SpeechLanguage,
-    force_reanalysis: bool,
-    analysis_task: Option<Receiver<(i64, AnalysisRecord)>>,
+    analysis_task: Option<AnalysisTask>,
     analysis_cancel: Option<Arc<AtomicBool>>,
     analysis_running_id: Option<i64>,
+    confirm_close: bool,
 }
 
 impl CatalogEditor {
-    pub fn new(store: SqliteCatalog) -> Result<Self, CatalogError> {
+    pub(super) fn with_settings(
+        store: SqliteCatalog,
+        settings: EditorSettings,
+    ) -> Result<Self, CatalogError> {
         let materials = store.materials()?;
         let stored_materials = store.search(&SearchFilter::default())?;
         let material_id = materials.first().map(|material| material.id);
@@ -84,6 +118,7 @@ impl CatalogEditor {
             materials,
             stored_materials,
             material_id,
+            drafts: HashMap::new(),
             keywords: String::new(),
             tags: String::new(),
             roles: String::new(),
@@ -94,22 +129,36 @@ impl CatalogEditor {
             active_tab: EditorTab::Search,
             keep_open: false,
             message: None,
-            whisper_path: default_whisper_path("Release/whisper-cli.exe"),
-            model_path: default_whisper_path("ggml-tiny.bin"),
-            ollama_model: String::new(),
+            whisper_path: settings.whisper_path,
+            model_path: settings.model_path,
+            ollama_model: settings.ollama_model,
             ollama_models: Vec::new(),
             ollama_models_task: Some(models_receiver),
             ollama_available: None,
             ollama_start_requested: false,
-            speech_recognition: false,
-            speech_language: SpeechLanguage::Auto,
-            force_reanalysis: false,
+            speech_recognition: settings.speech_recognition,
+            speech_language: settings.speech_language,
             analysis_task: None,
             analysis_cancel: None,
             analysis_running_id: None,
+            confirm_close: false,
         };
         editor.load_selected();
         Ok(editor)
+    }
+
+    pub(super) fn settings(&self) -> EditorSettings {
+        EditorSettings {
+            whisper_path: self.whisper_path.clone(),
+            model_path: self.model_path.clone(),
+            ollama_model: self.ollama_model.clone(),
+            speech_recognition: self.speech_recognition,
+            speech_language: self.speech_language,
+        }
+    }
+
+    pub fn selected_ollama_model(&self) -> Option<&str> {
+        (!self.ollama_model.is_empty()).then_some(self.ollama_model.as_str())
     }
 
     pub fn count(&self) -> usize {
@@ -140,8 +189,17 @@ impl CatalogEditor {
                         .inner
                         .clicked()
                     {
-                        self.open = false;
-                        event = PanelEvent::Closed;
+                        match self.has_unsaved_metadata() {
+                            Ok(true) => self.confirm_close = true,
+                            Ok(false) => {
+                                self.discard_changes();
+                                self.open = false;
+                                event = PanelEvent::Closed;
+                            }
+                            Err(error) => {
+                                self.message = Some((theme::State::Error, error.to_string()))
+                            }
+                        }
                     }
                 });
             });
@@ -154,27 +212,77 @@ impl CatalogEditor {
                 });
             }
         });
+        if self.confirm_close {
+            egui::Modal::new(egui::Id::new("confirm_close_catalog_editor")).show(ui.ctx(), |ui| {
+                ui.label(theme::section_title("未保存の素材情報"));
+                ui.label("保存していない素材情報があります。閉じる前に保存しますか？");
+                ui.horizontal(|ui| {
+                    if theme::button(ui, "保存して閉じる", theme::ButtonKind::Primary).clicked()
+                    {
+                        match self.save_all_drafts() {
+                            Ok(()) => {
+                                self.confirm_close = false;
+                                self.open = false;
+                                event = PanelEvent::Saved;
+                            }
+                            Err(error) => {
+                                self.message = Some((theme::State::Error, error.to_string()))
+                            }
+                        }
+                    }
+                    if theme::button(ui, "保存せず閉じる", theme::ButtonKind::Normal).clicked()
+                    {
+                        self.discard_changes();
+                        self.confirm_close = false;
+                        self.open = false;
+                        event = PanelEvent::Closed;
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close = false;
+                    }
+                });
+            });
+        }
         event
     }
 
     fn controls(&mut self, ui: &mut Ui) -> bool {
         if let Some(task) = &self.analysis_task {
             match task.try_recv() {
-                Ok((id, record)) => {
-                    let state = if record.status == AnalysisStatus::Completed {
+                Ok((id, record, transcript, suggestions)) => {
+                    let completed = record.status == AnalysisStatus::Completed;
+                    let partial_failure = record.error.is_some();
+                    let state = if completed && !partial_failure {
                         theme::State::Ready
                     } else {
                         theme::State::Attention
                     };
-                    let message = match record.status {
-                        AnalysisStatus::Completed => {
-                            "解析結果を保存しました。解析タブで確認してください。"
+                    let message = match (record.status, partial_failure) {
+                        (AnalysisStatus::Completed, false) => {
+                            "音声から情報を反映しました。編集欄を確認し、必要なら修正してください。"
                         }
-                        AnalysisStatus::Interrupted => "解析を中断しました。",
-                        _ => "解析に失敗しました。解析タブで理由を確認してください。",
+                        (AnalysisStatus::Completed, true) => {
+                            "文字起こしを反映しました。Ollama の分類に失敗したため、タグと役割を確認してください。"
+                        }
+                        (AnalysisStatus::Interrupted, _) => {
+                            "情報抽出を中断しました。編集中の情報は保持しています。"
+                        }
+                        _ => "解析に失敗しました。編集中の情報は保持しています。",
                     };
                     self.message = match self.store.save_analysis(id, &record) {
-                        Ok(()) => Some((state, message.into())),
+                        Ok(()) => {
+                            if completed {
+                                self.apply_suggestions(id, &transcript, suggestions.as_ref());
+                            }
+                            Some((
+                                state,
+                                if let Some(error) = record.error {
+                                    format!("{message} {error}")
+                                } else {
+                                    message.into()
+                                },
+                            ))
+                        }
                         Err(e) => Some((theme::State::Error, e.to_string())),
                     };
                     self.analysis_task = None;
@@ -192,7 +300,7 @@ impl CatalogEditor {
                     .request_repaint_after(std::time::Duration::from_millis(200)),
             }
         }
-        ui.label(theme::body("素材に入っている言葉・タグ・役割を手で登録できます。").strong());
+        ui.label(theme::body("音声から検索語句を起こし、Ollama でタグと役割を補います。結果を確認してから保存してください。").strong());
         ui.label(theme::body(
             "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
         ));
@@ -209,27 +317,19 @@ impl CatalogEditor {
         }
         ui.horizontal(|ui| {
             Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Metadata, "手入力");
-            Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "解析");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Metadata, "編集");
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "設定");
         });
         ui.add_space(theme::SPACE_SM);
         match self.active_tab {
             EditorTab::Search => self.search_controls(ui),
             EditorTab::Metadata => self.metadata_controls(ui),
-            EditorTab::Analysis => self.analysis_controls(ui),
+            EditorTab::Analysis => self.settings_controls(ui),
         }
     }
 
-    fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
-        ui.label(theme::body(
-            "選択中の素材を文字起こしします（結果は手入力の情報と別に保存します）",
-        ));
-        ui.label(theme::body(
-            "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
-        ));
-        ui.label(theme::detail_muted(
-            "① FFmpeg で音声を変換 → ② Whisper で文字起こし → ③ Ollama で説明候補を作成（任意）",
-        ));
+    fn settings_controls(&mut self, ui: &mut Ui) -> bool {
+        ui.label(theme::body("入力支援に使う方式とモデルを設定します。"));
         let previous = self.material_id;
         ui.horizontal(|ui| {
             theme::form_label(ui, "素材");
@@ -251,6 +351,7 @@ impl CatalogEditor {
                 });
         });
         if previous != self.material_id {
+            self.remember_draft(previous);
             self.load_selected();
         }
         ui.horizontal(|ui| {
@@ -267,10 +368,7 @@ impl CatalogEditor {
                 });
             if self.speech_recognition {
                 theme::local_label(ui);
-            }
-        });
-        if self.speech_recognition {
-            ui.horizontal(|ui| {
+                ui.add_space(theme::SPACE_SM);
                 theme::form_label(ui, "音声の言語");
                 egui::ComboBox::from_id_salt("speech_language")
                     .selected_text(match self.speech_language {
@@ -289,8 +387,8 @@ impl CatalogEditor {
                             "日本語",
                         );
                     });
-            });
-        }
+            }
+        });
         if let Some(task) = &self.ollama_models_task {
             match task.try_recv() {
                 Ok(Ok(result)) => {
@@ -321,7 +419,6 @@ impl CatalogEditor {
                 }
                 Ok(Err(error)) => {
                     self.ollama_models.clear();
-                    self.ollama_model.clear();
                     self.ollama_available = Some(false);
                     if self.ollama_start_requested {
                         self.message = Some((theme::State::Error, error.to_string()));
@@ -415,6 +512,11 @@ impl CatalogEditor {
             if !self.ollama_model.is_empty() {
                 ui.label(theme::detail(&self.ollama_model));
                 theme::local_label(ui);
+                if self.ollama_available == Some(false) {
+                    ui.label(theme::detail_muted(
+                        "Ollama は利用できません。選択は保持しています。",
+                    ));
+                }
             }
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
@@ -441,6 +543,15 @@ impl CatalogEditor {
                 });
             }
         });
+        self.show_message(ui);
+        false
+    }
+
+    fn analysis_controls(&mut self, ui: &mut Ui) {
+        let transcription_available = self.speech_recognition
+            && executable_exists("ffmpeg")
+            && executable_exists(&self.whisper_path)
+            && PathBuf::from(&self.model_path).is_file();
         if self.speech_recognition {
             if !executable_exists("ffmpeg") {
                 theme::state_message(
@@ -461,35 +572,26 @@ impl CatalogEditor {
         if self.analysis_task.is_some() {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(16.0).color(theme::ACCENT));
-                ui.label(theme::body("解析中…"));
+                ui.label(theme::body("音声から情報を抽出中…"));
             });
             ui.label(theme::detail_muted(
                 "Ollama 実行中の中断は応答を待って反映されます。",
             ));
-            if theme::button(ui, "解析を中断", theme::ButtonKind::Normal).clicked()
+            if theme::button(ui, "情報抽出を中断", theme::ButtonKind::Normal).clicked()
                 && let Some(cancel) = &self.analysis_cancel
             {
                 cancel.store(true, Ordering::Relaxed);
             }
         }
         let start_clicked = ui
-            .horizontal_wrapped(|ui| {
-                let clicked = ui
-                    .add_enabled_ui(
-                        self.analysis_task.is_none()
-                            && self.material_id.is_some()
-                            && self.speech_recognition
-                            && executable_exists("ffmpeg")
-                            && executable_exists(&self.whisper_path)
-                            && PathBuf::from(&self.model_path).is_file(),
-                        |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
-                    )
-                    .inner
-                    .clicked();
-                ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
-                clicked
-            })
-            .inner;
+            .add_enabled_ui(
+                self.analysis_task.is_none()
+                    && self.material_id.is_some()
+                    && transcription_available,
+                |ui| theme::button(ui, "音声から情報を起こす", theme::ButtonKind::Primary),
+            )
+            .inner
+            .clicked();
         if start_clicked
             && let Some(material) = self
                 .materials
@@ -528,20 +630,46 @@ impl CatalogEditor {
                     Err(error) => {
                         self.message = Some((theme::State::Error, error.to_string()));
                         self.show_message(ui);
-                        return false;
+                        return;
                     }
                 };
-                if !self.force_reanalysis
-                    && previous.as_ref().is_some_and(|record| {
-                        record.status == AnalysisStatus::Completed
-                            && record.fingerprint == fingerprint
-                            && record.configuration == configuration
-                    })
-                {
-                    self.message = Some((theme::State::Ready, "同じ素材と設定の解析結果を表示しています。再実行には「同じ素材と設定でも再解析する」を選んでください。".into()));
-                    return false;
+                let cached = previous.as_ref().and_then(|record| {
+                    if record.status == AnalysisStatus::Completed
+                        && record.fingerprint == fingerprint
+                        && record.configuration == configuration
+                    {
+                        analysis_transcript(record).map(|transcript| (record.clone(), transcript))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((mut record, transcript)) = cached {
+                    self.message = Some((
+                        theme::State::Ready,
+                        "保存済みの音声結果から情報を反映しています。".into(),
+                    ));
+                    let (sender, receiver) = mpsc::channel();
+                    self.analysis_task = Some(receiver);
+                    self.analysis_running_id = None;
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    self.analysis_cancel = Some(Arc::clone(&cancel));
+                    let ollama_model = ollama_model.clone();
+                    std::thread::spawn(move || {
+                        let mut suggestions = analysis_suggestions(&record);
+                        if suggestions.is_none() && !ollama_model.is_empty() {
+                            match ollama::suggest_metadata(&ollama_model, &transcript) {
+                                Ok(metadata) => {
+                                    record.error = None;
+                                    record.candidates.extend(metadata_candidates(&metadata));
+                                    suggestions = Some(metadata);
+                                }
+                                Err(error) => record.error = Some(error.to_string()),
+                            }
+                        }
+                        let _ = sender.send((id, record, transcript, suggestions));
+                    });
+                    return;
                 }
-                let had_previous = previous.is_some();
                 let mut record = previous.unwrap_or_else(|| AnalysisRecord {
                     fingerprint: fingerprint.clone(),
                     configuration: format!("{}", config.model.display()),
@@ -554,35 +682,50 @@ impl CatalogEditor {
                 match self.store.save_analysis(id, &record) {
                     Ok(()) => {
                         self.message =
-                            Some((theme::State::Ready, "文字起こしを実行しています。".into()));
+                            Some((theme::State::Ready, "音声から情報を抽出しています。".into()));
                         let (sender, receiver) = mpsc::channel();
                         self.analysis_task = Some(receiver);
                         self.analysis_running_id = Some(id);
                         let cancel = Arc::new(AtomicBool::new(false));
                         self.analysis_cancel = Some(Arc::clone(&cancel));
                         std::thread::spawn(move || {
+                            let mut suggestions = None;
+                            let mut transcript = String::new();
+                            let retain_previous_metadata = record.fingerprint == fingerprint;
+                            let previous_metadata = record
+                                .candidates
+                                .iter()
+                                .filter(|candidate| {
+                                    candidate
+                                        .evidence
+                                        .as_deref()
+                                        .is_some_and(|evidence| evidence.starts_with("metadata:"))
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
                             match local_stt::transcribe(&config, &path, &fingerprint, &cancel) {
-                                Ok(mut candidates) => {
+                                Ok(candidates) => {
+                                    let mut cached_metadata = if retain_previous_metadata {
+                                        previous_metadata
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    transcript = candidates
+                                        .iter()
+                                        .map(|candidate| candidate.text.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
                                     if !ollama_model.is_empty()
                                         && !candidates.is_empty()
                                         && !cancel.load(Ordering::Relaxed)
                                     {
-                                        match ollama::summarize(&ollama_model, &candidates) {
-                                            Ok(summary) => candidates.push(summary),
+                                        match ollama::suggest_metadata(&ollama_model, &transcript) {
+                                            Ok(metadata) => {
+                                                cached_metadata = metadata_candidates(&metadata);
+                                                suggestions = Some(metadata);
+                                            }
                                             Err(error) => {
                                                 record.error = Some(error.to_string());
-                                                record.status = if cancel.load(Ordering::Relaxed) {
-                                                    AnalysisStatus::Interrupted
-                                                } else {
-                                                    AnalysisStatus::Failed
-                                                };
-                                                if !had_previous {
-                                                    record.fingerprint = fingerprint;
-                                                    record.configuration = configuration;
-                                                    record.candidates = candidates;
-                                                }
-                                                let _ = sender.send((id, record));
-                                                return;
                                             }
                                         }
                                     }
@@ -591,7 +734,8 @@ impl CatalogEditor {
                                     } else {
                                         record.fingerprint = fingerprint;
                                         record.configuration = configuration;
-                                        record.candidates = candidates;
+                                        record.candidates = cached_metadata;
+                                        record.candidates.extend(candidates);
                                         record.status = AnalysisStatus::Completed;
                                     }
                                 }
@@ -605,7 +749,7 @@ impl CatalogEditor {
                                         };
                                 }
                             }
-                            let _ = sender.send((id, record));
+                            let _ = sender.send((id, record, transcript, suggestions));
                         });
                     }
                     Err(e) => self.message = Some((theme::State::Error, e.to_string())),
@@ -617,125 +761,12 @@ impl CatalogEditor {
                 ));
             }
         }
-        if let Some(id) = self.material_id {
-            match self.store.analysis(id) {
-                Ok(Some(mut record)) => {
-                    if record.status == AnalysisStatus::Running && self.analysis_task.is_none() {
-                        ui.label(theme::body(
-                            "前回の解析は完了していません。必要なら再解析してください。",
-                        ));
-                    }
-                    if let Some(error) = &record.error {
-                        ui.label(theme::body(error));
-                    }
-                    if self
-                        .materials
-                        .iter()
-                        .find(|m| m.id == id)
-                        .is_some_and(|m| m.fingerprint != record.fingerprint)
-                    {
-                        ui.label(theme::body("素材が変更されています。再解析してください。"));
-                    }
-                    if !record.candidates.is_empty() {
-                        ui.separator();
-                        if let Some(material) = self.materials.iter().find(|m| m.id == id) {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(theme::section_title(format!(
-                                    "文字起こし結果 — {}",
-                                    material.source_path
-                                )));
-                                theme::ready_badge(ui, "保存済み");
-                            });
-                        }
-                    }
-                    let mut changed = false;
-                    for (index, candidate) in record.candidates.iter_mut().enumerate() {
-                        changed |= ui
-                            .push_id(index, |ui| {
-                                let is_summary =
-                                    candidate.evidence.as_deref() == Some("文字起こし候補の要約");
-                                if let Some(evidence) = candidate.evidence.as_deref()
-                                    && evidence != "音声からの文字起こし候補"
-                                {
-                                    let label = if evidence == "文字起こし候補の要約" {
-                                        "文字起こしの要約"
-                                    } else {
-                                        evidence
-                                    };
-                                    ui.label(theme::detail(label));
-                                }
-                                let edited = if is_summary {
-                                    ui.add(
-                                        egui::Label::new(theme::body(markdown_plain_text(
-                                            &candidate.text,
-                                        )))
-                                        .selectable(true)
-                                        .wrap(),
-                                    );
-                                    false
-                                } else {
-                                    ui.add_enabled(
-                                        self.analysis_task.is_none(),
-                                        egui::TextEdit::multiline(&mut candidate.text),
-                                    )
-                                    .changed()
-                                };
-                                if let Some(original) = &candidate.original_text
-                                    && original != &candidate.text
-                                {
-                                    ui.label(theme::detail_muted(format!(
-                                        "当初の生成結果: {original}"
-                                    )));
-                                }
-                                edited
-                            })
-                            .inner;
-                    }
-                    if !record.candidates.is_empty() {
-                        ui.collapsing("解析の詳細", |ui| {
-                            let mut models = Vec::new();
-                            let mut languages = Vec::new();
-                            for candidate in &record.candidates {
-                                let label = if candidate.evidence.as_deref()
-                                    == Some("文字起こし候補の要約")
-                                {
-                                    "テキスト解析モデル"
-                                } else {
-                                    "音声認識モデル"
-                                };
-                                let model = (label, candidate.model.as_str());
-                                if !models.contains(&model) {
-                                    ui.label(theme::detail(format!(
-                                        "{label}: {}",
-                                        candidate.model
-                                    )));
-                                    models.push(model);
-                                }
-                                if let Some(language) = candidate.language.as_deref()
-                                    && !languages.contains(&language)
-                                {
-                                    let name = match language {
-                                        "ja" => "日本語",
-                                        "ko" => "韓国語",
-                                        "en" => "英語",
-                                        _ => language,
-                                    };
-                                    ui.label(theme::detail(format!("言語候補: {name}")));
-                                    languages.push(language);
-                                }
-                            }
-                        });
-                    }
-                    if changed && let Err(e) = self.store.save_analysis(id, &record) {
-                        self.message = Some((theme::State::Error, e.to_string()));
-                    }
-                }
-                Err(e) => self.message = Some((theme::State::Error, e.to_string())),
-                _ => {}
-            }
-        }
+        ui.label(theme::detail_muted(if self.ollama_model.is_empty() {
+            "実行すると文字起こしが検索語句に入ります。設定で Ollama を選ぶと、タグと役割も補います。"
+        } else {
+            "実行すると検索語句・タグ・役割に情報を反映します。既存の値に重複しないよう追加します。"
+        }));
         self.show_message(ui);
-        false
     }
 
     fn tab_button(ui: &mut Ui, active_tab: &mut EditorTab, tab: EditorTab, label: &str) {
@@ -805,6 +836,7 @@ impl CatalogEditor {
             },
         );
         if let Some(id) = selection {
+            self.remember_draft(self.material_id);
             self.material_id = Some(id);
             self.load_selected();
             self.active_tab = EditorTab::Metadata;
@@ -815,11 +847,12 @@ impl CatalogEditor {
 
     fn metadata_controls(&mut self, ui: &mut Ui) -> bool {
         ui.label(theme::body(
-            "検索語句・タグ・役割は、この素材に保存する情報です。",
+            "未保存の入力は 02・03 に移動しても保持されます。01 に戻って保存してください。",
         ));
         let selected = self.material_id;
+        let material_selector_width = (ui.available_width() - theme::SPACE_SM).max(120.0);
         egui::ComboBox::from_id_salt("material")
-            .width(640.0)
+            .width(material_selector_width)
             .selected_text(
                 self.materials
                     .iter()
@@ -836,9 +869,11 @@ impl CatalogEditor {
                 }
             });
         if selected != self.material_id {
+            self.remember_draft(selected);
             self.load_selected();
         }
         ui.separator();
+        let metadata_input_width = (ui.available_width() - 150.0).max(120.0);
         egui::Grid::new("metadata").num_columns(2).show(ui, |ui| {
             for (label, value) in [
                 ("検索語句", &mut self.keywords),
@@ -847,13 +882,18 @@ impl CatalogEditor {
                 ("メモ", &mut self.note),
             ] {
                 ui.label(theme::detail(label));
-                theme::text_input(ui, value, "", 510.0);
+                theme::text_input(ui, value, "", metadata_input_width);
                 ui.end_row();
             }
         });
         ui.label(theme::detail_muted(
             "複数の検索語句・タグ・役割はカンマ区切りです。",
         ));
+        ui.separator();
+        ui.label(theme::detail_muted(
+            "設定タブで方式を選び、文字起こしを実行できます。",
+        ));
+        self.analysis_controls(ui);
         let selected = self.material_id.is_some();
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
@@ -889,22 +929,150 @@ impl CatalogEditor {
         changed
     }
 
+    fn remember_draft(&mut self, id: Option<i64>) {
+        if let Some(id) = id {
+            self.drafts.insert(
+                id,
+                (
+                    self.keywords.clone(),
+                    self.tags.clone(),
+                    self.roles.clone(),
+                    self.note.clone(),
+                ),
+            );
+        }
+    }
+
+    fn apply_suggestions(
+        &mut self,
+        id: i64,
+        transcript: &str,
+        suggestions: Option<&ollama::MetadataSuggestions>,
+    ) {
+        let mut values = if self.material_id == Some(id) {
+            (
+                self.keywords.clone(),
+                self.tags.clone(),
+                self.roles.clone(),
+                self.note.clone(),
+            )
+        } else if let Some(draft) = self.drafts.get(&id) {
+            draft.clone()
+        } else {
+            match self.store.search(&SearchFilter::default()) {
+                Ok(materials) => materials
+                    .into_iter()
+                    .find(|material| material.id == id)
+                    .map(|material| {
+                        (
+                            material.metadata.keywords.join(", "),
+                            material.metadata.tags.join(", "),
+                            material.metadata.roles.join(", "),
+                            material.metadata.note,
+                        )
+                    })
+                    .unwrap_or_default(),
+                Err(error) => {
+                    self.message = Some((theme::State::Error, error.to_string()));
+                    return;
+                }
+            }
+        };
+
+        append_metadata_values(&mut values.0, &[transcript.to_owned()]);
+        if let Some(suggestions) = suggestions {
+            append_metadata_values(&mut values.0, &suggestions.keywords);
+            append_metadata_values(&mut values.1, &suggestions.tags);
+            append_metadata_values(&mut values.2, &suggestions.roles);
+        }
+        self.drafts.insert(id, values.clone());
+        if self.material_id == Some(id) {
+            self.keywords = values.0;
+            self.tags = values.1;
+            self.roles = values.2;
+            self.note = values.3;
+        }
+    }
+
     fn load_selected(&mut self) {
         let Some(id) = self.material_id else {
             return;
         };
-        let metadata = self
-            .stored_materials
-            .iter()
-            .find(|material| material.id == id)
-            .map(|material| &material.metadata)
-            .cloned()
-            .unwrap_or_default();
+        if let Some((keywords, tags, roles, note)) = self.drafts.get(&id) {
+            self.keywords.clone_from(keywords);
+            self.tags.clone_from(tags);
+            self.roles.clone_from(roles);
+            self.note.clone_from(note);
+            return;
+        }
+        let metadata = match self.store.search(&SearchFilter::default()) {
+            Ok(materials) => materials
+                .into_iter()
+                .find(|material| material.id == id)
+                .map(|material| material.metadata)
+                .unwrap_or_default(),
+            Err(error) => {
+                self.message = Some((theme::State::Error, error.to_string()));
+                return;
+            }
+        };
         self.keywords = metadata.keywords.join(", ");
         self.tags = metadata.tags.join(", ");
         self.roles = metadata.roles.join(", ");
         self.note = metadata.note;
         self.message = None;
+    }
+
+    pub(super) fn has_unsaved_metadata(&self) -> Result<bool, CatalogError> {
+        let stored_materials = self.store.search(&SearchFilter::default())?;
+        let differs = |id: i64, keywords: &str, tags: &str, roles: &str, note: &str| {
+            let current = metadata_from_fields(keywords, tags, roles, note);
+            stored_materials
+                .iter()
+                .find(|material| material.id == id)
+                .map(|material| &material.metadata)
+                != Some(&current)
+        };
+
+        for (id, (keywords, tags, roles, note)) in &self.drafts {
+            if differs(*id, keywords, tags, roles, note) {
+                return Ok(true);
+            }
+        }
+        if let Some(id) = self.material_id
+            && differs(id, &self.keywords, &self.tags, &self.roles, &self.note)
+        {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub(super) fn save_all_drafts(&mut self) -> Result<(), CatalogError> {
+        let mut pending = self.drafts.clone();
+        if let Some(id) = self.material_id {
+            pending.insert(
+                id,
+                (
+                    self.keywords.clone(),
+                    self.tags.clone(),
+                    self.roles.clone(),
+                    self.note.clone(),
+                ),
+            );
+        }
+        for (id, (keywords, tags, roles, note)) in pending {
+            let metadata = metadata_from_fields(&keywords, &tags, &roles, &note);
+            self.store.save_metadata(id, &metadata)?;
+        }
+        self.drafts.clear();
+        self.refresh()?;
+        self.load_selected();
+        Ok(())
+    }
+
+    pub(super) fn discard_changes(&mut self) {
+        self.drafts.clear();
+        self.load_selected();
     }
 
     fn show_message(&self, ui: &mut Ui) {
@@ -917,13 +1085,9 @@ impl CatalogEditor {
 
     fn save(&mut self) -> Result<(), CatalogError> {
         let material_id = self.material_id.ok_or(CatalogError::NoMaterialSelected)?;
-        let metadata = Metadata {
-            keywords: split(&self.keywords),
-            tags: split(&self.tags),
-            roles: split(&self.roles),
-            note: self.note.clone(),
-        };
+        let metadata = metadata_from_fields(&self.keywords, &self.tags, &self.roles, &self.note);
         self.store.save_metadata(material_id, &metadata)?;
+        self.drafts.remove(&material_id);
         self.refresh()?;
         self.load_selected();
         Ok(())
@@ -949,9 +1113,135 @@ impl Drop for CatalogEditor {
             && let Ok(Some(mut record)) = self.store.analysis(id)
         {
             record.status = AnalysisStatus::Interrupted;
-            record.error = Some("アプリ終了により解析を中断しました".into());
+            record.error = Some("アプリ終了により情報抽出を中断しました".into());
             let _ = self.store.save_analysis(id, &record);
         }
+    }
+}
+
+fn append_metadata_values(target: &mut String, additions: &[String]) {
+    let mut values = Vec::new();
+    for value in split(target) {
+        let parts: Vec<_> = value.split("」「").collect();
+        if parts.len() > 1
+            && parts.iter().all(|part| {
+                let part = normalize_metadata_value(part);
+                !part.is_empty()
+                    && additions
+                        .iter()
+                        .any(|addition| normalize_metadata_value(addition) == part)
+            })
+        {
+            values.extend(
+                parts
+                    .into_iter()
+                    .map(|part| part.trim().trim_matches(['「', '」']).trim().to_owned()),
+            );
+        } else {
+            values.push(value);
+        }
+    }
+    for addition in additions.iter().map(|value| value.trim()) {
+        if !addition.is_empty()
+            && !values
+                .iter()
+                .any(|value| normalize_metadata_value(value) == normalize_metadata_value(addition))
+        {
+            values.push(addition.to_owned());
+        }
+    }
+    *target = values.join(", ");
+}
+
+fn analysis_transcript(record: &AnalysisRecord) -> Option<String> {
+    let transcript = record
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.evidence.as_deref() != Some("文字起こし候補の要約")
+                && !candidate
+                    .evidence
+                    .as_deref()
+                    .is_some_and(|evidence| evidence.starts_with("metadata:"))
+        })
+        .map(|candidate| candidate.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!transcript.is_empty()).then_some(transcript)
+}
+
+fn metadata_candidates(suggestions: &ollama::MetadataSuggestions) -> Vec<AnalysisCandidate> {
+    let mut candidates = vec![AnalysisCandidate {
+        text: String::new(),
+        original_text: None,
+        language: None,
+        start_ms: 0,
+        end_ms: 0,
+        model: "Ollama".into(),
+        model_version: String::new(),
+        confidence: None,
+        evidence: Some("metadata:complete".into()),
+    }];
+    candidates.extend(
+        [
+            ("metadata:keyword", &suggestions.keywords),
+            ("metadata:tag", &suggestions.tags),
+            ("metadata:role", &suggestions.roles),
+        ]
+        .into_iter()
+        .flat_map(|(evidence, values)| {
+            values.iter().map(move |value| AnalysisCandidate {
+                text: value.clone(),
+                original_text: None,
+                language: None,
+                start_ms: 0,
+                end_ms: 0,
+                model: "Ollama".into(),
+                model_version: String::new(),
+                confidence: None,
+                evidence: Some(evidence.into()),
+            })
+        }),
+    );
+    candidates
+}
+
+fn analysis_suggestions(record: &AnalysisRecord) -> Option<ollama::MetadataSuggestions> {
+    let values = |evidence: &str| {
+        record
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.evidence.as_deref() == Some(evidence))
+            .map(|candidate| candidate.text.clone())
+            .collect::<Vec<_>>()
+    };
+    let suggestions = ollama::MetadataSuggestions {
+        keywords: values("metadata:keyword"),
+        tags: values("metadata:tag"),
+        roles: values("metadata:role"),
+    };
+    record
+        .candidates
+        .iter()
+        .any(|candidate| candidate.evidence.as_deref() == Some("metadata:complete"))
+        .then(|| suggestions.normalized())
+}
+
+fn normalize_metadata_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn metadata_from_fields(keywords: &str, tags: &str, roles: &str, note: &str) -> Metadata {
+    Metadata {
+        keywords: split(keywords),
+        tags: split(tags),
+        roles: split(roles),
+        note: note.to_owned(),
     }
 }
 
@@ -996,32 +1286,26 @@ fn nonempty(text: &str) -> Option<&str> {
     (!text.is_empty()).then_some(text)
 }
 
-fn markdown_plain_text(markdown: &str) -> String {
-    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
-    let mut text = String::new();
-    for event in Parser::new(markdown) {
-        match event {
-            Event::Text(value) | Event::Code(value) => text.push_str(&value),
-            Event::Start(Tag::Item) => text.push_str("• "),
-            Event::End(
-                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
-            )
-            | Event::SoftBreak
-            | Event::HardBreak
-                if !text.ends_with('\n') =>
-            {
-                text.push('\n')
-            }
-            _ => {}
-        }
-    }
-    text.trim_end().to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::service::create_plan;
+
+    #[test]
+    fn editor_settings_round_trip_preserves_selected_models_and_paths() {
+        let settings = EditorSettings {
+            whisper_path: "tools/whisper-cli.exe".into(),
+            model_path: "models/ggml-small.bin".into(),
+            ollama_model: "gemma4:e2b".into(),
+            speech_recognition: true,
+            speech_language: SpeechLanguage::Japanese,
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let restored: EditorSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(restored, settings);
+    }
 
     #[test]
     fn missing_ffmpeg_does_not_prevent_catalog_search() {
@@ -1048,14 +1332,203 @@ mod tests {
         );
     }
     #[test]
-    fn summary_markdown_is_readable_without_raw_formatting() {
-        let text =
-            markdown_plain_text("**内容の候補:**\n\n* **確認:** こんにちは\n* **注意:** 不明です");
-        assert_eq!(text, "内容の候補:\n• 確認: こんにちは\n• 注意: 不明です");
+    fn switching_materials_keeps_unsaved_input_and_save_makes_it_searchable() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        std::fs::write(materials.join("b.wav"), b"b").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
+        let first = editor.material_id;
+        editor.keywords = "既存の入力".into();
+        append_metadata_values(&mut editor.keywords, &["文字起こし".into()]);
+        editor.roles = "導入".into();
+        editor.remember_draft(first);
+        editor.material_id = Some(editor.materials[1].id);
+        editor.load_selected();
+        editor.remember_draft(editor.material_id);
+        editor.material_id = first;
+        editor.load_selected();
+        assert_eq!(editor.keywords, "既存の入力, 文字起こし");
+        editor.save().unwrap();
+        assert_eq!(
+            create_plan(
+                &editor.store.candidate_catalog().unwrap(),
+                "導入: 文字起こし"
+            )
+            .slots[0]
+                .candidates
+                .len(),
+            1
+        );
     }
 
     #[test]
-    fn unavailable_ollama_clears_selected_model_and_available_models() {
+    fn failed_analysis_preserves_unsaved_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
+        editor.keywords = "編集中".into();
+        editor.note = "残すメモ".into();
+        let (sender, receiver) = mpsc::channel();
+        editor.analysis_task = Some(receiver);
+        sender
+            .send((
+                editor.material_id.unwrap(),
+                AnalysisRecord {
+                    fingerprint: "test".into(),
+                    configuration: "test".into(),
+                    status: AnalysisStatus::Failed,
+                    candidates: vec![],
+                    error: Some("失敗".into()),
+                },
+                String::new(),
+                None,
+            ))
+            .unwrap();
+        let context = egui::Context::default();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                editor.controls(ui);
+            });
+        });
+        assert_eq!(editor.keywords, "編集中");
+        assert_eq!(editor.note, "残すメモ");
+        assert!(editor.message().is_some());
+    }
+
+    #[test]
+    fn metadata_suggestions_are_not_loaded_again_after_discard() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("nani.wav"), b"audio").unwrap();
+        let path = temp.path().join("catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
+        store.rescan().unwrap();
+        let material = store.materials().unwrap().remove(0);
+        let mut record = AnalysisRecord {
+            fingerprint: material.fingerprint,
+            configuration: "Whisper / Ollama".into(),
+            status: AnalysisStatus::Completed,
+            candidates: vec![AnalysisCandidate {
+                text: "何?".into(),
+                original_text: None,
+                language: Some("ja".into()),
+                start_ms: 0,
+                end_ms: 900,
+                model: "whisper".into(),
+                model_version: "test".into(),
+                confidence: None,
+                evidence: Some("音声から文字起こし候補".into()),
+            }],
+            error: None,
+        };
+        record
+            .candidates
+            .extend(metadata_candidates(&ollama::MetadataSuggestions {
+                keywords: vec!["何".into()],
+                tags: vec!["質問」「確認".into()],
+                roles: vec!["反応".into()],
+            }));
+        store.save_analysis(material.id, &record).unwrap();
+        drop(store);
+
+        let mut editor = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        assert!(!editor.has_unsaved_metadata().unwrap());
+
+        let cached_record = editor.store.analysis(material.id).unwrap().unwrap();
+        let transcript = analysis_transcript(&cached_record).unwrap();
+        let suggestions = analysis_suggestions(&cached_record).unwrap();
+        editor.apply_suggestions(material.id, &transcript, Some(&suggestions));
+        assert_eq!(editor.keywords, "何?");
+        assert_eq!(editor.tags, "質問, 確認");
+        assert_eq!(editor.roles, "反応");
+        assert!(editor.has_unsaved_metadata().unwrap());
+        editor.discard_changes();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        assert!(!editor.has_unsaved_metadata().unwrap());
+        drop(editor);
+
+        let mut editor = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        let cached_record = editor.store.analysis(material.id).unwrap().unwrap();
+        let transcript = analysis_transcript(&cached_record).unwrap();
+        let suggestions = analysis_suggestions(&cached_record).unwrap();
+        editor.apply_suggestions(material.id, &transcript, Some(&suggestions));
+        editor.save().unwrap();
+        assert!(!editor.has_unsaved_metadata().unwrap());
+
+        let reopened = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
+        assert_eq!(reopened.keywords, "何?");
+        assert_eq!(reopened.tags, "質問, 確認");
+        assert_eq!(reopened.roles, "反応");
+    }
+
+    #[test]
+    fn audio_suggestions_fill_metadata_fields_and_preserve_existing_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("a.wav"), b"a").unwrap();
+        let mut store =
+            SqliteCatalog::create(&temp.path().join("catalog.sqlite"), temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
+        let id = editor.material_id.unwrap();
+        editor.keywords = "手入力語".into();
+        editor.tags = "手入力タグ, 質問」「確認, 手動」「入力".into();
+        editor.roles = "導入".into();
+        editor.note = "利用者のメモ".into();
+        editor.apply_suggestions(
+            id,
+            "なに?",
+            Some(&ollama::MetadataSuggestions {
+                keywords: vec!["なに".into(), "補助キーワード".into()],
+                tags: vec![
+                    "反応".into(),
+                    "手入力タグ".into(),
+                    "質問".into(),
+                    "確認".into(),
+                ],
+                roles: vec!["リアクション".into()],
+            }),
+        );
+        assert_eq!(editor.keywords, "手入力語, なに?, 補助キーワード");
+        assert_eq!(editor.tags, "手入力タグ, 質問, 確認, 手動」「入力, 反応");
+        assert_eq!(editor.roles, "導入, リアクション");
+        assert_eq!(editor.note, "利用者のメモ");
+    }
+
+    #[test]
+    fn unavailable_ollama_preserves_selected_model_and_clears_available_models() {
         let temp = tempfile::tempdir().unwrap();
         let materials = temp.path().join("materials");
         std::fs::create_dir(&materials).unwrap();
@@ -1063,7 +1536,7 @@ mod tests {
         let path = temp.path().join("catalog.sqlite");
         let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         editor.active_tab = EditorTab::Analysis;
         editor.ollama_model = "gemma4:e2b".into();
         editor.ollama_models = vec!["gemma4:e2b".into()];
@@ -1078,9 +1551,10 @@ mod tests {
             });
         });
 
-        assert!(editor.ollama_model.is_empty());
+        assert_eq!(editor.ollama_model, "gemma4:e2b");
         assert!(editor.ollama_models.is_empty());
         assert_eq!(editor.ollama_available, Some(false));
+        assert_eq!(editor.settings().ollama_model, "gemma4:e2b");
     }
 
     #[test]
@@ -1092,7 +1566,7 @@ mod tests {
         let path = temp.path().join("catalog.sqlite");
         let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
         store.rescan().unwrap();
-        let mut editor = CatalogEditor::new(store).unwrap();
+        let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         editor.keywords = "テッカマン".into();
         editor.tags = "画, 反応".into();
         editor.roles = "導入".into();
@@ -1105,7 +1579,11 @@ mod tests {
         });
         assert!(!output.shapes.is_empty());
         drop(editor);
-        let reopened = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        let reopened = CatalogEditor::with_settings(
+            SqliteCatalog::open(&path).unwrap(),
+            EditorSettings::default(),
+        )
+        .unwrap();
         assert_eq!(
             reopened.stored_materials[0].metadata.tags,
             vec!["画", "反応"]

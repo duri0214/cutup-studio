@@ -1,6 +1,6 @@
 //! Local speech-to-text using FFmpeg and whisper.cpp.
 use crate::domain::valueobject::catalog::AnalysisCandidate;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::{
@@ -37,7 +37,7 @@ pub struct SttConfig {
     pub language: SpeechLanguage,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpeechLanguage {
     #[default]
     Auto,

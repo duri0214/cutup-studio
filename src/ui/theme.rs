@@ -224,6 +224,10 @@ pub fn panel() -> Frame {
         .inner_margin(PANEL_PADDING)
 }
 
+pub fn section_panel(selected: bool) -> Frame {
+    panel().stroke(Stroke::new(1.0_f32, if selected { ACCENT } else { BORDER }))
+}
+
 pub fn content_frame() -> Frame {
     Frame::new().fill(BACKGROUND).inner_margin(CONTENT_PADDING)
 }
@@ -300,14 +304,26 @@ pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
     response
 }
 
-pub fn role_label(ui: &mut Ui, text: &str) {
-    ui.allocate_ui_with_layout(
-        Vec2::new(48.0, 24.0),
-        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| {
-            ui.label(detail(text));
-        },
-    );
+pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
+    let text_color = if selected { ACCENT } else { TEXT };
+    let fill = if selected {
+        SELECTED_BACKGROUND
+    } else {
+        CONTROL
+    };
+    let stroke = if selected { ACCENT } else { BORDER };
+    ui.add(
+        egui::Button::new(
+            RichText::new(text)
+                .size(DETAIL_TEXT_SIZE)
+                .strong()
+                .color(text_color),
+        )
+        .fill(fill)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .min_size(Vec2::new(48.0, 24.0)),
+    )
+    .on_hover_text("この枠の候補を右ペインに表示")
 }
 
 pub fn role_badge_button(ui: &mut Ui, text: &str) -> Response {
@@ -356,6 +372,64 @@ pub fn tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
         );
     }
     response
+}
+
+pub fn section_tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
+    ui.horizontal(|ui| {
+        let tab_response = tab(ui, label, selected, width);
+        let arrow_response = section_arrow_button(ui, selected);
+        tab_response.union(arrow_response)
+    })
+    .inner
+}
+
+fn section_arrow_button(ui: &mut Ui, selected: bool) -> Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 24.0), sense);
+    let fill = if !enabled {
+        PANEL
+    } else if response.hovered() {
+        CONTROL_HOVERED
+    } else {
+        CONTROL
+    };
+    let color = if !enabled {
+        state_color(State::Disabled)
+    } else if selected || response.hovered() {
+        state_color(State::Selected)
+    } else {
+        MUTED
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(SMALL_CONTROL_RADIUS), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(SMALL_CONTROL_RADIUS),
+        Stroke::new(1.0_f32, color.gamma_multiply(0.75)),
+        StrokeKind::Inside,
+    );
+    let center = rect.center();
+    let stroke = Stroke::new(1.5_f32, color);
+    ui.painter().line_segment(
+        [
+            Pos2::new(center.x - 2.0, center.y - 4.0),
+            Pos2::new(center.x + 2.0, center.y),
+        ],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [
+            Pos2::new(center.x + 2.0, center.y),
+            Pos2::new(center.x - 2.0, center.y + 4.0),
+        ],
+        stroke,
+    );
+    response.on_hover_text("クリックして右ペインを表示")
 }
 
 pub fn text_input(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> Response {
@@ -684,6 +758,105 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
 #[cfg(test)]
 mod tests {
     use eframe::egui;
+
+    #[test]
+    fn role_label_responds_to_click() {
+        fn show(context: &egui::Context, events: Vec<egui::Event>) -> (egui::Pos2, bool) {
+            let mut position = None;
+            let mut clicked = false;
+            let _ = context.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let response = super::role_label(ui, "01 反応", false);
+                        position = Some(response.rect.center());
+                        clicked = response.clicked();
+                    });
+                },
+            );
+            (position.unwrap(), clicked)
+        }
+
+        let context = egui::Context::default();
+        let (position, _) = show(&context, Vec::new());
+        show(
+            &context,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let (_, clicked) = show(
+            &context,
+            vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+
+        assert!(clicked);
+    }
+
+    #[test]
+    fn section_tab_arrow_responds_to_click() {
+        fn show(context: &egui::Context, events: Vec<egui::Event>) -> (egui::Pos2, bool) {
+            let mut position = None;
+            let mut clicked = false;
+            let _ = context.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let response = super::section_tab(ui, "03 の情報を表示", false, 150.0);
+                        position = Some(egui::pos2(
+                            response.rect.right() - 12.0,
+                            response.rect.center().y,
+                        ));
+                        clicked = response.clicked();
+                    });
+                },
+            );
+            (position.unwrap(), clicked)
+        }
+
+        let context = egui::Context::default();
+        let (position, _) = show(&context, Vec::new());
+        show(
+            &context,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let (_, clicked) = show(
+            &context,
+            vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+
+        assert!(clicked);
+    }
 
     #[test]
     fn form_labels_keep_following_controls_aligned_for_different_lengths() {
