@@ -674,3 +674,18 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ollama_logo_rasterizes_in_a_color_that_accepts_ui_tint() {
+        let logo = egui_extras::image::load_svg_bytes(
+            include_bytes!("../../assets/icons/ollama/ollama-logo.svg"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(logo.pixels.iter().any(|pixel| {
+            pixel.a() >= 200 && pixel.r() >= 200 && pixel.g() >= 200 && pixel.b() >= 200
+        }));
+    }
+}
