@@ -6,7 +6,7 @@ use std::{
 
 pub fn inputs(catalog: &Catalog, recipe: &CompositionRecipe) -> Result<Vec<PathBuf>, String> {
     if recipe.slots.is_empty() {
-        return Err("保存済みの構成が空です。".into());
+        return Err("構成が空です。".into());
     }
     let root = Path::new(&catalog.material_root)
         .join("materials")
@@ -19,7 +19,7 @@ pub fn inputs(catalog: &Catalog, recipe: &CompositionRecipe) -> Result<Vec<PathB
         .map(|slot| {
             let selection = slot.selection.as_ref().ok_or_else(|| {
                 format!(
-                    "{}番の素材が未選択です。02で選んで保存してください。",
+                    "{}番の素材が未選択です。02で選んでください。",
                     slot.slot.order
                 )
             })?;

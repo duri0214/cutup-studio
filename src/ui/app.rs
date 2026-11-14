@@ -801,23 +801,16 @@ impl StudioApp {
         }
     }
 
+    fn export_inputs(&self) -> Result<Vec<PathBuf>, String> {
+        let recipe = self
+            .current_recipe()
+            .ok_or("02で素材を選択してください。")?;
+        let catalog = self.catalog.as_ref().ok_or("カタログがありません。")?;
+        crate::infra::export::inputs(catalog, &recipe)
+    }
+
     fn start_export(&mut self, context: &egui::Context) {
-        let result = (|| {
-            let editor = self
-                .editor
-                .as_ref()
-                .ok_or("基準フォルダを開いてください".to_owned())?;
-            let recipe = editor
-                .store
-                .load_recipe()
-                .map_err(|e| e.to_string())?
-                .ok_or("03で構成を保存してください".to_owned())?;
-            let catalog = self
-                .catalog
-                .as_ref()
-                .ok_or("カタログがありません".to_owned())?;
-            crate::infra::export::inputs(catalog, &recipe)
-        })();
+        let result = self.export_inputs();
         let inputs = match result {
             Ok(value) => value,
             Err(error) => {
@@ -885,18 +878,6 @@ impl StudioApp {
             .iter()
             .filter(|(_, _, candidate)| candidate.is_some())
             .count();
-        let saved_matches = self
-            .current_recipe()
-            .and_then(|current| {
-                self.editor
-                    .as_ref()?
-                    .store
-                    .load_recipe()
-                    .ok()
-                    .flatten()
-                    .map(|saved| recipes_match(&current, &saved))
-            })
-            .unwrap_or(false);
         let mut save_requested = false;
         let mut load_requested = false;
         let mut export_requested = false;
@@ -945,11 +926,8 @@ impl StudioApp {
             }
             ui.separator();
             ui.label(theme::detail_muted(
-                "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
+                "表示中の構成を順番に連結し、ステレオ WAV として書き出します。",
             ));
-            if self.editor.is_some() && !saved_matches {
-                ui.label(theme::detail_muted("表示中の構成を保存するか、保存済みの構成を読み込んでください。"));
-            }
             let encoder_available = self.editor.is_some()
                 && super::catalog_editor::executable_exists("ffmpeg");
             if self.editor.is_some() && !encoder_available {
@@ -959,7 +937,7 @@ impl StudioApp {
                 theme::state_message(ui, theme::State::Error, error);
             }
             if ui
-                .add_enabled_ui(encoder_available && saved_matches && self.export_task.is_none(), |ui| {
+                .add_enabled_ui(encoder_available && !entries.is_empty() && self.export_task.is_none(), |ui| {
                     theme::button(ui, "WAVを書き出す", theme::ButtonKind::Normal)
                 })
                 .inner
@@ -1059,17 +1037,6 @@ impl eframe::App for StudioApp {
     }
 }
 
-fn recipes_match(current: &CompositionRecipe, saved: &CompositionRecipe) -> bool {
-    !current.slots.is_empty()
-        && current.slots.len() == saved.slots.len()
-        && current.slots.iter().zip(&saved.slots).all(|(a, b)| {
-            a.slot.order == b.slot.order
-                && a.slot.role == b.slot.role
-                && a.slot.query == b.slot.query
-                && a.selection.as_ref().map(|s| &s.material_id)
-                    == b.selection.as_ref().map(|s| &s.material_id)
-        })
-}
 fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
@@ -1111,33 +1078,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn export_requires_current_selection_to_match_saved_recipe() {
-        use crate::domain::valueobject::GuideSlot;
-        let slot = |id: &str| CompositionRecipeSlot {
-            slot: GuideSlot {
-                id: "slot-1".into(),
-                order: 1,
-                role: "導入".into(),
-                query: "rin".into(),
-            },
-            selection: Some(RecipeSelection {
-                material_id: id.into(),
-                score: 1,
-                reasons: vec![],
+    fn export_uses_current_selection_without_loading_or_saving_recipe() {
+        use crate::domain::valueobject::{CatalogMaterial, GuideSlot, SlotPlan};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("materials")).unwrap();
+        for name in ["apple.wav", "pear.wav"] {
+            std::fs::write(dir.path().join("materials").join(name), b"audio").unwrap();
+        }
+        let material = |id: &str, name: &str| CatalogMaterial {
+            id: id.into(),
+            source_path: format!("materials/{name}"),
+            keywords: vec![],
+            tags: vec![],
+            roles: vec![],
+            note: String::new(),
+        };
+        let candidate = |id: &str, name: &str| Candidate {
+            material_id: id.into(),
+            source_path: format!("materials/{name}"),
+            score: 1,
+            reasons: vec![],
+            tags: vec![],
+            roles: vec![],
+        };
+        let mut app = StudioApp {
+            catalog: Some(Catalog {
+                schema_version: 1,
+                material_root: dir.path().to_string_lossy().into_owned(),
+                materials: vec![material("1", "apple.wav"), material("2", "pear.wav")],
             }),
+            catalog_path: None,
+            demo_mode: false,
+            editor: None,
+            catalog_task: None,
+            guide_inputs: vec![],
+            plan: Some(Plan {
+                slots: vec![SlotPlan {
+                    slot: GuideSlot {
+                        id: "slot-1".into(),
+                        order: 1,
+                        role: "導入".into(),
+                        query: "fruit".into(),
+                    },
+                    candidates: vec![],
+                }],
+            }),
+            selections: BTreeMap::new(),
+            active_slot: None,
+            dragged_guide_index: None,
+            status: String::new(),
+            export_task: None,
+            export_error: None,
         };
-        let saved = CompositionRecipe {
-            slots: vec![slot("apple")],
-        };
-        let current = CompositionRecipe {
-            slots: vec![slot("pear")],
-        };
-        assert!(!recipes_match(&current, &saved));
-        assert!(recipes_match(&current, &current));
-        assert!(!recipes_match(
-            &CompositionRecipe { slots: vec![] },
-            &CompositionRecipe { slots: vec![] }
-        ));
+        app.selections
+            .insert("slot-1".into(), candidate("1", "apple.wav"));
+        assert!(app.export_inputs().unwrap()[0].ends_with("apple.wav"));
+        app.selections
+            .insert("slot-1".into(), candidate("2", "pear.wav"));
+        assert!(app.export_inputs().unwrap()[0].ends_with("pear.wav"));
+        app.selections.clear();
+        assert!(app.export_inputs().unwrap_err().contains("未選択"));
     }
     #[test]
     fn input_focus_maps_to_populated_slot_even_with_empty_rows() {
