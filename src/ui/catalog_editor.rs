@@ -606,11 +606,6 @@ impl CatalogEditor {
                                 }
                                 ui.collapsing("解析の詳細", |ui| {
                                     ui.label(theme::detail(format!(
-                                        "音声内の位置（素材の先頭から約 {:.1}秒〜{:.1}秒）",
-                                        candidate.start_ms as f64 / 1000.0,
-                                        candidate.end_ms as f64 / 1000.0
-                                    )));
-                                    ui.label(theme::detail(format!(
                                         "使用モデル: {}",
                                         candidate.model
                                     )));
