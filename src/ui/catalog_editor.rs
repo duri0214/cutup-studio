@@ -564,7 +564,7 @@ impl CatalogEditor {
                     }
                     if !record.candidates.is_empty() {
                         ui.separator();
-                        ui.label(theme::section_title("保存済みの解析結果"));
+                        ui.label(theme::section_title("この素材の保存済み解析結果"));
                     }
                     let mut changed = false;
                     for candidate in &mut record.candidates {
@@ -572,11 +572,9 @@ impl CatalogEditor {
                             ui.label(theme::detail(evidence));
                         }
                         ui.label(theme::detail(format!(
-                            "素材の先頭から {}.{:03}秒〜{}.{:03}秒",
-                            candidate.start_ms / 1000,
-                            candidate.start_ms % 1000,
-                            candidate.end_ms / 1000,
-                            candidate.end_ms % 1000
+                            "音声内の位置（素材の先頭から約 {:.1}秒〜{:.1}秒）",
+                            candidate.start_ms as f64 / 1000.0,
+                            candidate.end_ms as f64 / 1000.0
                         )));
                         ui.label(theme::detail(format!("使用モデル: {}", candidate.model)));
                         if let Some(language) = &candidate.language {
