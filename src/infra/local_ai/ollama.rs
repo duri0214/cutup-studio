@@ -18,15 +18,35 @@ pub enum OllamaError {
     StartFailed,
 }
 
+fn executable() -> Option<std::path::PathBuf> {
+    let default = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("Programs/Ollama/ollama.exe"))
+        .filter(|p| p.is_file());
+    default.or_else(|| {
+        std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| {
+                    dir.join(if cfg!(windows) {
+                        "ollama.exe"
+                    } else {
+                        "ollama"
+                    })
+                })
+                .find(|path| path.is_file())
+        })
+    })
+}
+
+pub fn is_installed() -> bool {
+    executable().is_some()
+}
+
 pub fn start_and_list_models() -> Result<Vec<String>, OllamaError> {
     if let Ok(models) = local_models() {
         return Ok(models);
     }
-    let executable = std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .map(|p| p.join("Programs/Ollama/ollama.exe"))
-        .filter(|p| p.is_file())
-        .unwrap_or_else(|| "ollama".into());
+    let executable = executable().ok_or(OllamaError::StartFailed)?;
     let mut command = std::process::Command::new(executable);
     command
         .arg("serve")

@@ -487,7 +487,9 @@ pub fn icon_button(ui: &mut Ui, icon: ActionIcon, tooltip: &str, kind: ButtonKin
         StrokeKind::Inside,
     );
     paint_action_icon(ui, icon, rect.center(), Vec2::splat(16.0), icon_color);
-    response.on_hover_text(tooltip)
+    response
+        .on_hover_text(tooltip)
+        .on_disabled_hover_text(tooltip)
 }
 
 pub fn drag_handle(ui: &mut Ui) -> Response {

@@ -283,7 +283,7 @@ impl CatalogEditor {
                     self.ollama_available = Some(true);
                     if self.ollama_start_requested {
                         self.message =
-                            Some((theme::State::Ready, "Ollama を起動しました。".into()));
+                            Some((theme::State::Ready, "Ollama を利用できます。".into()));
                     }
                     self.ollama_start_requested = false;
                     self.ollama_models_task = None;
@@ -307,7 +307,7 @@ impl CatalogEditor {
         }
         ui.horizontal(|ui| {
             theme::form_label(ui, "テキスト解析");
-            egui::ComboBox::from_id_salt("text_analyzer")
+            let models_menu = egui::ComboBox::from_id_salt("text_analyzer")
                 .selected_text(if self.ollama_model.is_empty() {
                     "なし"
                 } else {
@@ -319,6 +319,9 @@ impl CatalogEditor {
                         .clicked()
                     {
                         self.ollama_model.clear();
+                    }
+                    if self.ollama_models_task.is_some() {
+                        ui.label(theme::detail_muted("モデルを読み込み中…"));
                     }
                     for model in &self.ollama_models {
                         if ui
@@ -332,30 +335,36 @@ impl CatalogEditor {
                         }
                     }
                 });
-            if theme::button(ui, "再読み込み", theme::ButtonKind::Normal)
-                .on_hover_text("利用できるモデルの一覧を再取得")
-                .clicked()
+            if models_menu.response.clicked()
+                && models_menu.inner.is_some()
                 && self.ollama_models_task.is_none()
             {
                 let (sender, receiver) = mpsc::channel();
+                self.ollama_models.clear();
                 self.ollama_models_task = Some(receiver);
                 self.ollama_start_requested = false;
+                ui.ctx().request_repaint();
                 std::thread::spawn(move || {
                     let _ = sender.send(ollama::local_models());
                 });
             }
-            if self.ollama_available == Some(false)
-                && ui
-                    .add_enabled_ui(self.ollama_models_task.is_none(), |ui| {
-                        theme::icon_button(
-                            ui,
-                            theme::ActionIcon::Ollama,
-                            "Ollama に接続できません。クリックして起動",
-                            theme::ButtonKind::Normal,
-                        )
-                    })
-                    .inner
-                    .clicked()
+            let installed = ollama::is_installed();
+            let tooltip = if installed {
+                "Ollama を起動"
+            } else {
+                "Ollama が見つかりません。インストールしてください。"
+            };
+            if ui
+                .add_enabled_ui(installed && !self.ollama_start_requested, |ui| {
+                    theme::icon_button(
+                        ui,
+                        theme::ActionIcon::Ollama,
+                        tooltip,
+                        theme::ButtonKind::Normal,
+                    )
+                })
+                .inner
+                .clicked()
             {
                 let (sender, receiver) = mpsc::channel();
                 self.ollama_models_task = Some(receiver);
