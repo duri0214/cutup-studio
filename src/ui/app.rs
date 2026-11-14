@@ -40,6 +40,9 @@ pub struct StudioApp {
     active_slot: Option<usize>,
     dragged_guide_index: Option<usize>,
     status: String,
+    export_ffmpeg: String,
+    export_task: Option<Receiver<Result<String, String>>>,
+    export_error: Option<String>,
 }
 
 impl StudioApp {
@@ -56,6 +59,9 @@ impl StudioApp {
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
+            export_ffmpeg: "ffmpeg".into(),
+            export_task: None,
+            export_error: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
@@ -408,7 +414,10 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
-        if self.status.starts_with("CATALOG ERROR") || self.status.starts_with("CATALOG EXISTS") {
+        if self.status.starts_with("EXPORT ERROR")
+            || self.status.starts_with("CATALOG ERROR")
+            || self.status.starts_with("CATALOG EXISTS")
+        {
             (theme::State::Error, "ERROR")
         } else if self.catalog_task.is_some() {
             (theme::State::Attention, "SCANNING")
@@ -794,6 +803,72 @@ impl StudioApp {
         }
     }
 
+    fn start_export(&mut self, context: &egui::Context) {
+        let result = (|| {
+            let editor = self
+                .editor
+                .as_ref()
+                .ok_or("基準フォルダを開いてください".to_owned())?;
+            let recipe = editor
+                .store
+                .load_recipe()
+                .map_err(|e| e.to_string())?
+                .ok_or("03で構成を保存してください".to_owned())?;
+            let catalog = self
+                .catalog
+                .as_ref()
+                .ok_or("カタログがありません".to_owned())?;
+            crate::infra::export::inputs(catalog, &recipe)
+        })();
+        let inputs = match result {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                self.export_error = Some(error.clone());
+                self.status = format!("EXPORT ERROR — {error}");
+                return;
+            }
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("WAVの保存先")
+            .set_file_name("composition.wav")
+            .add_filter("WAV", &["wav"])
+            .save_file()
+        else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&self.export_ffmpeg);
+        let (sender, receiver) = mpsc::channel();
+        let context = context.clone();
+        std::thread::spawn(move || {
+            let result = crate::infra::export::render(&ffmpeg, &inputs, &output)
+                .map(|()| format!("書き出しました: {}", output.display()));
+            let _ = sender.send(result);
+            context.request_repaint();
+        });
+        self.export_error = None;
+        self.status = "EXPORT — 書き出し中…".into();
+        self.export_task = Some(receiver);
+    }
+
+    fn poll_export(&mut self) {
+        let Some(task) = &self.export_task else {
+            return;
+        };
+        let result = match task.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("書き出し処理が中断されました。".into()),
+        };
+        self.export_task = None;
+        match result {
+            Ok(message) => self.status = message,
+            Err(error) => {
+                self.status = format!("EXPORT ERROR — {error}");
+                self.export_error = Some(error);
+            }
+        }
+    }
+
     fn show_stage(&mut self, ui: &mut Ui) {
         let entries: Vec<_> = self
             .plan
@@ -814,6 +889,7 @@ impl StudioApp {
             .count();
         let mut save_requested = false;
         let mut load_requested = false;
+        let mut export_requested = false;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
@@ -855,6 +931,34 @@ impl StudioApp {
                 });
                 ui.add_space(theme::SPACE_XL);
             }
+            ui.separator();
+            ui.label(theme::detail_muted(
+                "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
+            ));
+            ui.horizontal(|ui| {
+                ui.label("FFmpeg");
+                ui.text_edit_singleline(&mut self.export_ffmpeg);
+                if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
+                    && let Some(path) = rfd::FileDialog::new().pick_file()
+                {
+                    self.export_ffmpeg = path.to_string_lossy().into_owned();
+                }
+            });
+            ui.label(theme::detail_muted(
+                "FFmpegの導入手順はREADMEを参照してください。",
+            ));
+            if let Some(error) = &self.export_error {
+                theme::state_message(ui, theme::State::Error, error);
+            }
+            if ui
+                .add_enabled_ui(self.editor.is_some() && self.export_task.is_none(), |ui| {
+                    theme::button(ui, "WAVを書き出す", theme::ButtonKind::Normal)
+                })
+                .inner
+                .clicked()
+            {
+                export_requested = true;
+            }
             for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
                 candidate.as_ref().map(|candidate| (order, role, candidate))
             }) {
@@ -862,6 +966,9 @@ impl StudioApp {
                 ui.add_space(theme::SPACE_XXS);
             }
         });
+        if export_requested {
+            self.start_export(ui.ctx());
+        }
         if save_requested {
             self.save_recipe();
         }
@@ -874,6 +981,7 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_catalog_task();
+        self.poll_export();
         let busy = self.catalog_task.is_some();
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
         let mut panel_event = PanelEvent::None;
