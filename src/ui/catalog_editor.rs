@@ -1205,7 +1205,7 @@ fn analysis_suggestions(record: &AnalysisRecord) -> Option<ollama::MetadataSugge
         .candidates
         .iter()
         .any(|candidate| candidate.evidence.as_deref() == Some("metadata:complete"))
-        .then_some(suggestions)
+        .then(|| suggestions.normalized())
 }
 
 fn normalize_metadata_value(value: &str) -> String {
@@ -1416,7 +1416,7 @@ mod tests {
             .candidates
             .extend(metadata_candidates(&ollama::MetadataSuggestions {
                 keywords: vec!["何".into()],
-                tags: vec!["疑問".into()],
+                tags: vec!["質問」「確認".into()],
                 roles: vec!["反応".into()],
             }));
         store.save_analysis(material.id, &record).unwrap();
@@ -1437,7 +1437,7 @@ mod tests {
         let suggestions = analysis_suggestions(&cached_record).unwrap();
         editor.apply_suggestions(material.id, &transcript, Some(&suggestions));
         assert_eq!(editor.keywords, "何?");
-        assert_eq!(editor.tags, "疑問");
+        assert_eq!(editor.tags, "質問, 確認");
         assert_eq!(editor.roles, "反応");
         assert!(editor.has_unsaved_metadata().unwrap());
         editor.discard_changes();
@@ -1468,7 +1468,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reopened.keywords, "何?");
-        assert_eq!(reopened.tags, "疑問");
+        assert_eq!(reopened.tags, "質問, 確認");
         assert_eq!(reopened.roles, "反応");
     }
 

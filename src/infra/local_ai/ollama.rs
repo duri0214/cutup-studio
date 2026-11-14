@@ -158,10 +158,27 @@ pub struct MetadataSuggestions {
     pub roles: Vec<String>,
 }
 
+impl MetadataSuggestions {
+    pub(crate) fn normalized(mut self) -> Self {
+        for values in [&mut self.keywords, &mut self.tags, &mut self.roles] {
+            *values = values
+                .iter()
+                .flat_map(|value| value.split("」「"))
+                .flat_map(|value| value.split([',', '，', '、']))
+                .map(|value| value.trim().trim_matches(['「', '」']).trim())
+                .filter(|value| !value.is_empty() && value.chars().count() <= 40)
+                .take(5)
+                .map(str::to_owned)
+                .collect();
+        }
+        self
+    }
+}
+
 pub fn suggest_metadata(model: &str, transcript: &str) -> Result<MetadataSuggestions, OllamaError> {
     let transcript: String = transcript.chars().take(4000).collect();
     let prompt = format!(
-        "音声文字起こしから素材情報を抽出してください。JSON オブジェクトだけを返し、形式は {{\"keywords\":[\"...\"],\"tags\":[\"...\"],\"roles\":[\"...\"]}}。keywords は話された検索語、tags は内容の短い分類、roles は映像編集上の役割を必ず最適なものから選びます。短い一言でも役割を推定し、疑問や驚きの発話は「反応」、呼びかけや指示は「展開」、場面の導入は「導入」、間をつなぐ語は「つなぎ」とします。説明文は作らないでください。各配列は最大5件、各項目は40文字以内。\n\n文字起こし:\n{transcript}"
+        "音声文字起こしから素材情報を抽出してください。JSON オブジェクトだけを返し、形式は {{\"keywords\":[\"...\"],\"tags\":[\"...\"],\"roles\":[\"...\"]}}。語句・分類・役割はそれぞれ1件ずつ配列の別の要素にし、1つの文字列に複数の項目や「」をまとめないでください。keywords は話された検索語、tags は内容の短い分類、roles は映像編集上の役割を必ず最適なものから選びます。短い一言でも役割を推定し、疑問や驚きの発話は「反応」、呼びかけや指示は「展開」、場面の導入は「導入」、間をつなぐ語は「つなぎ」とします。説明文は作らないでください。各配列は最大5件、各項目は40文字以内。\n\n文字起こし:\n{transcript}"
     );
     let response = generate_at("http://127.0.0.1:11434", model, &prompt)?;
     parse_metadata_response(&response)
@@ -174,17 +191,9 @@ fn parse_metadata_response(response: &str) -> Result<MetadataSuggestions, Ollama
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let mut suggestions: MetadataSuggestions =
+    let suggestions: MetadataSuggestions =
         serde_json::from_str(json).map_err(|_| OllamaError::InvalidResponse)?;
-    for values in [
-        &mut suggestions.keywords,
-        &mut suggestions.tags,
-        &mut suggestions.roles,
-    ] {
-        values.retain(|value| !value.trim().is_empty() && value.chars().count() <= 40);
-        values.truncate(5);
-    }
-    Ok(suggestions)
+    Ok(suggestions.normalized())
 }
 
 fn generate_at(base: &str, model: &str, prompt: &str) -> Result<String, OllamaError> {
@@ -303,6 +312,20 @@ mod tests {
         assert_eq!(metadata.keywords, vec!["語句"; 5]);
         assert_eq!(metadata.tags, vec!["反応"]);
         assert_eq!(metadata.roles, vec!["導入"]);
+    }
+
+    #[test]
+    fn metadata_response_separates_tags_grouped_in_one_element() {
+        let response = serde_json::json!({
+            "keywords": ["何？"],
+            "tags": ["質問」「確認", "「疑問」、問いかけ"],
+            "roles": ["反応"]
+        })
+        .to_string();
+
+        let metadata = parse_metadata_response(&response).unwrap();
+
+        assert_eq!(metadata.tags, vec!["質問", "確認", "疑問", "問いかけ"]);
     }
 
     #[test]
