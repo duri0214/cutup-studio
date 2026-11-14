@@ -281,6 +281,10 @@ impl CatalogEditor {
                 Ok(Ok(models)) => {
                     self.ollama_models = models;
                     self.ollama_available = Some(true);
+                    if self.ollama_start_requested {
+                        self.message =
+                            Some((theme::State::Ready, "Ollama を起動しました。".into()));
+                    }
                     self.ollama_start_requested = false;
                     self.ollama_models_task = None;
                 }
@@ -340,34 +344,37 @@ impl CatalogEditor {
                     let _ = sender.send(ollama::local_models());
                 });
             }
+            if self.ollama_available == Some(false)
+                && ui
+                    .add_enabled_ui(self.ollama_models_task.is_none(), |ui| {
+                        theme::icon_button(
+                            ui,
+                            theme::ActionIcon::Ollama,
+                            "Ollama に接続できません。クリックして起動",
+                            theme::ButtonKind::Normal,
+                        )
+                    })
+                    .inner
+                    .clicked()
+            {
+                let (sender, receiver) = mpsc::channel();
+                self.ollama_models_task = Some(receiver);
+                self.ollama_start_requested = true;
+                self.message = Some((theme::State::Ready, "Ollama を起動しています。".into()));
+                std::thread::spawn(move || {
+                    let _ = sender.send(ollama::start_and_list_models());
+                });
+            }
+            if self.ollama_available == Some(true) && self.ollama_models.is_empty() {
+                ui.label(theme::detail_muted("モデルなし")).on_hover_text(
+                    "Ollama にローカルモデルがありません。「なし」で文字起こしできます。",
+                );
+            }
             if !self.ollama_model.is_empty() {
                 ui.label(theme::detail(&self.ollama_model));
                 theme::local_label(ui);
             }
         });
-        if self.ollama_available == Some(false) {
-            ui.label(theme::body(
-                "Ollama に接続できません。使わない場合は「なし」で続けられます。",
-            ));
-            if ui
-                .add_enabled_ui(self.ollama_models_task.is_none(), |ui| {
-                    theme::button(ui, "Ollama を起動", theme::ButtonKind::Normal)
-                })
-                .inner
-                .clicked()
-            {
-                let (sender, receiver) = mpsc::channel();
-                self.ollama_models_task = Some(receiver);
-                self.ollama_start_requested = true;
-                std::thread::spawn(move || {
-                    let _ = sender.send(ollama::start_and_list_models());
-                });
-            }
-        } else if self.ollama_available == Some(true) && self.ollama_models.is_empty() {
-            ui.label(theme::body(
-                "Ollama にローカルモデルがありません。「なし」で文字起こしできます。",
-            ));
-        }
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
                 ("音声変換", &mut self.ffmpeg_path),
