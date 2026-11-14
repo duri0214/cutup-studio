@@ -74,6 +74,7 @@ pub(super) struct CatalogEditor {
     analysis_task: Option<AnalysisTask>,
     analysis_cancel: Option<Arc<AtomicBool>>,
     analysis_running_id: Option<i64>,
+    confirm_close: bool,
 }
 
 impl CatalogEditor {
@@ -114,8 +115,9 @@ impl CatalogEditor {
             analysis_task: None,
             analysis_cancel: None,
             analysis_running_id: None,
+            confirm_close: false,
         };
-        editor.load_selected(true);
+        editor.load_selected();
         Ok(editor)
     }
 
@@ -151,8 +153,17 @@ impl CatalogEditor {
                         .inner
                         .clicked()
                     {
-                        self.open = false;
-                        event = PanelEvent::Closed;
+                        match self.has_unsaved_metadata() {
+                            Ok(true) => self.confirm_close = true,
+                            Ok(false) => {
+                                self.discard_changes();
+                                self.open = false;
+                                event = PanelEvent::Closed;
+                            }
+                            Err(error) => {
+                                self.message = Some((theme::State::Error, error.to_string()))
+                            }
+                        }
                     }
                 });
             });
@@ -165,6 +176,37 @@ impl CatalogEditor {
                 });
             }
         });
+        if self.confirm_close {
+            egui::Modal::new(egui::Id::new("confirm_close_catalog_editor")).show(ui.ctx(), |ui| {
+                ui.label(theme::section_title("未保存の素材情報"));
+                ui.label("保存していない素材情報があります。閉じる前に保存しますか？");
+                ui.horizontal(|ui| {
+                    if theme::button(ui, "保存して閉じる", theme::ButtonKind::Primary).clicked()
+                    {
+                        match self.save_all_drafts() {
+                            Ok(()) => {
+                                self.confirm_close = false;
+                                self.open = false;
+                                event = PanelEvent::Saved;
+                            }
+                            Err(error) => {
+                                self.message = Some((theme::State::Error, error.to_string()))
+                            }
+                        }
+                    }
+                    if theme::button(ui, "保存せず閉じる", theme::ButtonKind::Normal).clicked()
+                    {
+                        self.discard_changes();
+                        self.confirm_close = false;
+                        self.open = false;
+                        event = PanelEvent::Closed;
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close = false;
+                    }
+                });
+            });
+        }
         event
     }
 
@@ -222,7 +264,7 @@ impl CatalogEditor {
                     .request_repaint_after(std::time::Duration::from_millis(200)),
             }
         }
-        ui.label(theme::body("音声から検索語句を起こし、Ollama でタグと役割を補います。入力欄が空なら保存済みの結果を戻します。").strong());
+        ui.label(theme::body("音声から検索語句を起こし、Ollama でタグと役割を補います。結果を確認してから保存してください。").strong());
         ui.label(theme::body(
             "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
         ));
@@ -274,7 +316,7 @@ impl CatalogEditor {
         });
         if previous != self.material_id {
             self.remember_draft(previous);
-            self.load_selected(true);
+            self.load_selected();
         }
         ui.horizontal(|ui| {
             theme::form_label(ui, "音声認識");
@@ -466,14 +508,6 @@ impl CatalogEditor {
     }
 
     fn analysis_controls(&mut self, ui: &mut Ui) {
-        let cached_analysis = self.material_id.and_then(|id| {
-            let material = self.materials.iter().find(|material| material.id == id)?;
-            let record = self.store.analysis(id).ok().flatten()?;
-            (record.status == AnalysisStatus::Completed
-                && record.fingerprint == material.fingerprint)
-                .then(|| analysis_transcript(&record).map(|transcript| (id, record, transcript)))
-                .flatten()
-        });
         let transcription_available = self.speech_recognition
             && executable_exists("ffmpeg")
             && executable_exists(&self.whisper_path)
@@ -513,7 +547,7 @@ impl CatalogEditor {
             .add_enabled_ui(
                 self.analysis_task.is_none()
                     && self.material_id.is_some()
-                    && (transcription_available || cached_analysis.is_some()),
+                    && transcription_available,
                 |ui| theme::button(ui, "音声から情報を起こす", theme::ButtonKind::Primary),
             )
             .inner
@@ -562,7 +596,7 @@ impl CatalogEditor {
                 let cached = previous.as_ref().and_then(|record| {
                     if record.status == AnalysisStatus::Completed
                         && record.fingerprint == fingerprint
-                        && (!transcription_available || record.configuration == configuration)
+                        && record.configuration == configuration
                     {
                         analysis_transcript(record).map(|transcript| (record.clone(), transcript))
                     } else {
@@ -764,7 +798,7 @@ impl CatalogEditor {
         if let Some(id) = selection {
             self.remember_draft(self.material_id);
             self.material_id = Some(id);
-            self.load_selected(true);
+            self.load_selected();
             self.active_tab = EditorTab::Metadata;
         }
         self.show_message(ui);
@@ -796,7 +830,7 @@ impl CatalogEditor {
             });
         if selected != self.material_id {
             self.remember_draft(selected);
-            self.load_selected(true);
+            self.load_selected();
         }
         ui.separator();
         let metadata_input_width = (ui.available_width() - 150.0).max(120.0);
@@ -920,7 +954,7 @@ impl CatalogEditor {
         }
     }
 
-    fn load_selected(&mut self, restore_cached_analysis: bool) {
+    fn load_selected(&mut self) {
         let Some(id) = self.material_id else {
             return;
         };
@@ -947,28 +981,58 @@ impl CatalogEditor {
         self.roles = metadata.roles.join(", ");
         self.note = metadata.note;
         self.message = None;
-        if restore_cached_analysis
-            && self.keywords.trim().is_empty()
-            && self.tags.trim().is_empty()
-            && self.roles.trim().is_empty()
-        {
-            match self.store.analysis(id) {
-                Ok(Some(record))
-                    if record.status == AnalysisStatus::Completed
-                        && self
-                            .materials
-                            .iter()
-                            .find(|material| material.id == id)
-                            .is_some_and(|material| material.fingerprint == record.fingerprint)
-                        && let Some(transcript) = analysis_transcript(&record) =>
-                {
-                    let suggestions = analysis_suggestions(&record);
-                    self.apply_suggestions(id, &transcript, suggestions.as_ref());
-                }
-                Ok(_) => {}
-                Err(error) => self.message = Some((theme::State::Error, error.to_string())),
+    }
+
+    fn has_unsaved_metadata(&self) -> Result<bool, CatalogError> {
+        let stored_materials = self.store.search(&SearchFilter::default())?;
+        let differs = |id: i64, keywords: &str, tags: &str, roles: &str, note: &str| {
+            let current = metadata_from_fields(keywords, tags, roles, note);
+            stored_materials
+                .iter()
+                .find(|material| material.id == id)
+                .map(|material| &material.metadata)
+                != Some(&current)
+        };
+
+        for (id, (keywords, tags, roles, note)) in &self.drafts {
+            if differs(*id, keywords, tags, roles, note) {
+                return Ok(true);
             }
         }
+        if let Some(id) = self.material_id
+            && differs(id, &self.keywords, &self.tags, &self.roles, &self.note)
+        {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn save_all_drafts(&mut self) -> Result<(), CatalogError> {
+        let mut pending = self.drafts.clone();
+        if let Some(id) = self.material_id {
+            pending.insert(
+                id,
+                (
+                    self.keywords.clone(),
+                    self.tags.clone(),
+                    self.roles.clone(),
+                    self.note.clone(),
+                ),
+            );
+        }
+        for (id, (keywords, tags, roles, note)) in pending {
+            let metadata = metadata_from_fields(&keywords, &tags, &roles, &note);
+            self.store.save_metadata(id, &metadata)?;
+        }
+        self.drafts.clear();
+        self.refresh()?;
+        self.load_selected();
+        Ok(())
+    }
+
+    fn discard_changes(&mut self) {
+        self.drafts.clear();
+        self.load_selected();
     }
 
     fn show_message(&self, ui: &mut Ui) {
@@ -981,16 +1045,11 @@ impl CatalogEditor {
 
     fn save(&mut self) -> Result<(), CatalogError> {
         let material_id = self.material_id.ok_or(CatalogError::NoMaterialSelected)?;
-        let metadata = Metadata {
-            keywords: split(&self.keywords),
-            tags: split(&self.tags),
-            roles: split(&self.roles),
-            note: self.note.clone(),
-        };
+        let metadata = metadata_from_fields(&self.keywords, &self.tags, &self.roles, &self.note);
         self.store.save_metadata(material_id, &metadata)?;
         self.drafts.remove(&material_id);
         self.refresh()?;
-        self.load_selected(false);
+        self.load_selected();
         Ok(())
     }
 
@@ -1117,6 +1176,15 @@ fn normalize_metadata_value(value: &str) -> String {
         .collect()
 }
 
+fn metadata_from_fields(keywords: &str, tags: &str, roles: &str, note: &str) -> Metadata {
+    Metadata {
+        keywords: split(keywords),
+        tags: split(tags),
+        roles: split(roles),
+        note: note.to_owned(),
+    }
+}
+
 fn split(text: &str) -> Vec<String> {
     text.split([',', '、'])
         .map(str::trim)
@@ -1204,10 +1272,10 @@ mod tests {
         editor.roles = "導入".into();
         editor.remember_draft(first);
         editor.material_id = Some(editor.materials[1].id);
-        editor.load_selected(true);
+        editor.load_selected();
         editor.remember_draft(editor.material_id);
         editor.material_id = first;
-        editor.load_selected(true);
+        editor.load_selected();
         assert_eq!(editor.keywords, "既存の入力, 文字起こし");
         editor.save().unwrap();
         assert_eq!(
@@ -1262,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_analysis_repopulates_empty_fields_when_editor_reopens() {
+    fn metadata_suggestions_are_not_loaded_again_after_discard() {
         let temp = tempfile::tempdir().unwrap();
         let materials = temp.path().join("materials");
         std::fs::create_dir(&materials).unwrap();
@@ -1299,10 +1367,36 @@ mod tests {
         drop(store);
 
         let mut editor = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        assert!(!editor.has_unsaved_metadata().unwrap());
+
+        let cached_record = editor.store.analysis(material.id).unwrap().unwrap();
+        let transcript = analysis_transcript(&cached_record).unwrap();
+        let suggestions = analysis_suggestions(&cached_record).unwrap();
+        editor.apply_suggestions(material.id, &transcript, Some(&suggestions));
         assert_eq!(editor.keywords, "何?");
         assert_eq!(editor.tags, "疑問");
         assert_eq!(editor.roles, "反応");
+        assert!(editor.has_unsaved_metadata().unwrap());
+        editor.discard_changes();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        assert!(!editor.has_unsaved_metadata().unwrap());
+        drop(editor);
+
+        let mut editor = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
+        assert!(editor.keywords.is_empty());
+        assert!(editor.tags.is_empty());
+        assert!(editor.roles.is_empty());
+        let cached_record = editor.store.analysis(material.id).unwrap().unwrap();
+        let transcript = analysis_transcript(&cached_record).unwrap();
+        let suggestions = analysis_suggestions(&cached_record).unwrap();
+        editor.apply_suggestions(material.id, &transcript, Some(&suggestions));
         editor.save().unwrap();
+        assert!(!editor.has_unsaved_metadata().unwrap());
 
         let reopened = CatalogEditor::new(SqliteCatalog::open(&path).unwrap()).unwrap();
         assert_eq!(reopened.keywords, "何?");
