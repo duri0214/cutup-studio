@@ -12,7 +12,6 @@ use crate::{
         service::create_plan,
         valueobject::{
             Candidate, Catalog, CompositionRecipe, CompositionRecipeSlot, Plan, RecipeSelection,
-            SCHEMA_VERSION,
         },
     },
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
@@ -456,7 +455,6 @@ impl StudioApp {
                 if self.is_demo_catalog() && signal != theme::State::Error {
                     theme::ready_badge(ui, "DEMO");
                 }
-                ui.label(theme::caption_text(format!("SCHEMA V{SCHEMA_VERSION}")).monospace());
             });
         });
         ui.label(theme::body_muted(
