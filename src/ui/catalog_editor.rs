@@ -71,7 +71,6 @@ pub(super) struct CatalogEditor {
     ollama_start_requested: bool,
     speech_recognition: bool,
     speech_language: SpeechLanguage,
-    force_reanalysis: bool,
     analysis_task: Option<AnalysisTask>,
     analysis_cancel: Option<Arc<AtomicBool>>,
     analysis_running_id: Option<i64>,
@@ -112,7 +111,6 @@ impl CatalogEditor {
             ollama_start_requested: false,
             speech_recognition: false,
             speech_language: SpeechLanguage::Auto,
-            force_reanalysis: false,
             analysis_task: None,
             analysis_cancel: None,
             analysis_running_id: None,
@@ -512,21 +510,14 @@ impl CatalogEditor {
             }
         }
         let start_clicked = ui
-            .horizontal_wrapped(|ui| {
-                let clicked = ui
-                    .add_enabled_ui(
-                        self.analysis_task.is_none()
-                            && self.material_id.is_some()
-                            && (transcription_available
-                                || (cached_analysis.is_some() && !self.force_reanalysis)),
-                        |ui| theme::button(ui, "音声から情報を起こす", theme::ButtonKind::Primary),
-                    )
-                    .inner
-                    .clicked();
-                ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
-                clicked
-            })
-            .inner;
+            .add_enabled_ui(
+                self.analysis_task.is_none()
+                    && self.material_id.is_some()
+                    && (transcription_available || cached_analysis.is_some()),
+                |ui| theme::button(ui, "音声から情報を起こす", theme::ButtonKind::Primary),
+            )
+            .inner
+            .clicked();
         if start_clicked
             && let Some(material) = self
                 .materials
@@ -578,9 +569,7 @@ impl CatalogEditor {
                         None
                     }
                 });
-                if !self.force_reanalysis
-                    && let Some((mut record, transcript)) = cached
-                {
+                if let Some((mut record, transcript)) = cached {
                     self.message = Some((
                         theme::State::Ready,
                         "保存済みの音声結果から情報を反映しています。".into(),
