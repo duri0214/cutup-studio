@@ -191,7 +191,7 @@ fn summarize_at(
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "以下は音声認識の未確認テキストです。内容と反応の候補を短く日本語で説明してください。不明なことは推測で断定しないでください。\n\n{transcript}"
+        "以下は音声認識の未確認テキストです。内容と反応の候補を短く日本語で説明してください。不明なことは推測で断定せず、読み取れない場合は分からないと答えてください。Markdown を使わず、平文で答えてください。\n\n{transcript}"
     );
     let mut response = agent
         .post(format!("{base}/api/generate"))

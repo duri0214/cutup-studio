@@ -118,28 +118,30 @@ fn install_japanese_font(context: &Context) {
     let Some(windows_directory) = std::env::var_os("WINDIR") else {
         return;
     };
-    let path = std::path::Path::new(&windows_directory)
-        .join("Fonts")
-        .join("YuGothM.ttc");
-    let Ok(font_data) = std::fs::read(path) else {
-        return;
-    };
-
     let mut fonts = FontDefinitions::default();
-    let font_name = "yu-gothic".to_owned();
-    fonts.font_data.insert(
-        font_name.clone(),
-        Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
-            y_offset: 2.0,
-            ..Default::default()
-        })),
-    );
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .insert(0, font_name.clone());
+    for (name, file) in [
+        ("malgun-gothic", "malgun.ttf"),
+        ("yu-gothic", "YuGothM.ttc"),
+    ] {
+        let path = std::path::Path::new(&windows_directory)
+            .join("Fonts")
+            .join(file);
+        if let Ok(font_data) = std::fs::read(path) {
+            fonts.font_data.insert(
+                name.to_owned(),
+                Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
+                    y_offset: 2.0,
+                    ..Default::default()
+                })),
+            );
+            for family in [FontFamily::Proportional, FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .insert(0, name.to_owned());
+            }
+        }
     }
     context.set_fonts(fonts);
 }

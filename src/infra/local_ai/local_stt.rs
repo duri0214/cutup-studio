@@ -34,6 +34,23 @@ pub struct SttConfig {
     pub ffmpeg: PathBuf,
     pub whisper: PathBuf,
     pub model: PathBuf,
+    pub language: SpeechLanguage,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum SpeechLanguage {
+    #[default]
+    Auto,
+    Japanese,
+}
+
+impl SpeechLanguage {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Japanese => "ja",
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -100,7 +117,7 @@ pub fn transcribe(
     whisper
         .args(["-m"])
         .arg(&config.model)
-        .args(["-l", "auto", "-oj", "-of"])
+        .args(["-l", config.language.code(), "-oj", "-of"])
         .arg(&output)
         .arg("-f")
         .arg(&audio)
@@ -205,6 +222,7 @@ mod tests {
             ffmpeg: temp.path().join("missing-ffmpeg"),
             whisper: temp.path().join("whisper"),
             model,
+            language: SpeechLanguage::Auto,
         };
         let digest = fingerprint(&media, &cancel).unwrap();
         assert!(matches!(
@@ -222,12 +240,33 @@ mod tests {
             ffmpeg: temp.path().join("missing-ffmpeg"),
             whisper: temp.path().join("missing-whisper"),
             model: temp.path().join("missing-model"),
+            language: SpeechLanguage::Auto,
         };
         assert!(matches!(
             transcribe(&config, &media, "old-fingerprint", &AtomicBool::new(false)),
             Err(SttError::MaterialChanged)
         ));
     }
+    #[test]
+    #[ignore = "requires local ffmpeg, whisper-cli and a model"]
+    fn japanese_language_transcribes_demo_tekkaman() {
+        let config = SttConfig {
+            ffmpeg: std::env::var_os("CUTUP_TEST_FFMPEG").unwrap().into(),
+            whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
+            model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
+            language: SpeechLanguage::Japanese,
+        };
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/materials/01-tekkaman.wav");
+        let cancel = AtomicBool::new(false);
+        let digest = fingerprint(&source, &cancel).unwrap();
+        let candidates = transcribe(&config, &source, &digest, &cancel).unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.text.contains("テッカマン"))
+        );
+    }
+
     #[test]
     #[ignore = "requires local ffmpeg, whisper-cli and a model"]
     fn real_tools_transcribe_demo_material() {
@@ -241,6 +280,7 @@ mod tests {
             model: std::env::var_os("CUTUP_TEST_MODEL")
                 .expect("set CUTUP_TEST_MODEL")
                 .into(),
+            language: SpeechLanguage::Auto,
         };
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/materials/08-nani.wav");
         let cancel = AtomicBool::new(false);

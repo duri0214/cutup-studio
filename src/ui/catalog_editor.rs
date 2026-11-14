@@ -1,5 +1,5 @@
 use crate::infra::local_ai::{
-    local_stt::{self, SttConfig},
+    local_stt::{self, SpeechLanguage, SttConfig},
     ollama,
 };
 use crate::{
@@ -64,6 +64,7 @@ pub(super) struct CatalogEditor {
     ollama_start_requested: bool,
     audio_conversion: bool,
     speech_recognition: bool,
+    speech_language: SpeechLanguage,
     force_reanalysis: bool,
     analysis_task: Option<Receiver<(i64, AnalysisRecord)>>,
     analysis_cancel: Option<Arc<AtomicBool>>,
@@ -105,6 +106,7 @@ impl CatalogEditor {
             ollama_start_requested: false,
             audio_conversion: false,
             speech_recognition: false,
+            speech_language: SpeechLanguage::Auto,
             force_reanalysis: false,
             analysis_task: None,
             analysis_cancel: None,
@@ -281,6 +283,28 @@ impl CatalogEditor {
                 theme::local_label(ui);
             }
         });
+        if self.speech_recognition {
+            ui.horizontal(|ui| {
+                theme::form_label(ui, "音声の言語");
+                egui::ComboBox::from_id_salt("speech_language")
+                    .selected_text(match self.speech_language {
+                        SpeechLanguage::Auto => "自動検出",
+                        SpeechLanguage::Japanese => "日本語",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.speech_language,
+                            SpeechLanguage::Auto,
+                            "自動検出",
+                        );
+                        ui.selectable_value(
+                            &mut self.speech_language,
+                            SpeechLanguage::Japanese,
+                            "日本語",
+                        );
+                    });
+            });
+        }
         if let Some(task) = &self.ollama_models_task {
             match task.try_recv() {
                 Ok(Ok(result)) => {
@@ -492,10 +516,20 @@ impl CatalogEditor {
                     ffmpeg: PathBuf::from(&self.ffmpeg_path),
                     whisper: PathBuf::from(&self.whisper_path),
                     model: PathBuf::from(&self.model_path),
+                    language: self.speech_language,
                 };
                 let ollama_model = self.ollama_model.trim().to_owned();
                 let fingerprint = material.fingerprint.clone();
-                let configuration = format!("{} / {}", config.model.display(), ollama_model);
+                let configuration = if config.language == SpeechLanguage::Auto {
+                    format!("{} / {}", config.model.display(), ollama_model)
+                } else {
+                    format!(
+                        "{} / {} / {}",
+                        config.model.display(),
+                        ollama_model,
+                        config.language.code()
+                    )
+                };
                 let previous = match self.store.analysis(id) {
                     Ok(record) => record,
                     Err(error) => {
@@ -625,6 +659,8 @@ impl CatalogEditor {
                     for (index, candidate) in record.candidates.iter_mut().enumerate() {
                         changed |= ui
                             .push_id(index, |ui| {
+                                let is_summary =
+                                    candidate.evidence.as_deref() == Some("文字起こし候補の要約");
                                 if let Some(evidence) = candidate.evidence.as_deref()
                                     && evidence != "音声からの文字起こし候補"
                                 {
@@ -635,12 +671,22 @@ impl CatalogEditor {
                                     };
                                     ui.label(theme::detail(label));
                                 }
-                                let edited = ui
-                                    .add_enabled(
+                                let edited = if is_summary {
+                                    ui.add(
+                                        egui::Label::new(theme::body(markdown_plain_text(
+                                            &candidate.text,
+                                        )))
+                                        .selectable(true)
+                                        .wrap(),
+                                    );
+                                    false
+                                } else {
+                                    ui.add_enabled(
                                         self.analysis_task.is_none(),
                                         egui::TextEdit::multiline(&mut candidate.text),
                                     )
-                                    .changed();
+                                    .changed()
+                                };
                                 if let Some(original) = &candidate.original_text
                                     && original != &candidate.text
                                 {
@@ -654,7 +700,13 @@ impl CatalogEditor {
                                         candidate.model
                                     )));
                                     if let Some(language) = &candidate.language {
-                                        ui.label(theme::detail(format!("言語候補: {language}")));
+                                        let name = match language.as_str() {
+                                            "ja" => "日本語",
+                                            "ko" => "韓国語",
+                                            "en" => "英語",
+                                            _ => language,
+                                        };
+                                        ui.label(theme::detail(format!("言語候補: {name}")));
                                     }
                                 });
                                 edited
@@ -931,10 +983,39 @@ fn nonempty(text: &str) -> Option<&str> {
     (!text.is_empty()).then_some(text)
 }
 
+fn markdown_plain_text(markdown: &str) -> String {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut text = String::new();
+    for event in Parser::new(markdown) {
+        match event {
+            Event::Text(value) | Event::Code(value) => text.push_str(&value),
+            Event::Start(Tag::Item) => text.push_str("• "),
+            Event::End(
+                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
+            )
+            | Event::SoftBreak
+            | Event::HardBreak
+                if !text.ends_with('\n') =>
+            {
+                text.push('\n')
+            }
+            _ => {}
+        }
+    }
+    text.trim_end().to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::service::create_plan;
+
+    #[test]
+    fn summary_markdown_is_readable_without_raw_formatting() {
+        let text =
+            markdown_plain_text("**内容の候補:**\n\n* **確認:** こんにちは\n* **注意:** 不明です");
+        assert_eq!(text, "内容の候補:\n• 確認: こんにちは\n• 注意: 不明です");
+    }
 
     #[test]
     fn unavailable_ollama_clears_selected_model_and_available_models() {
