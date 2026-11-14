@@ -678,25 +678,34 @@ impl StudioApp {
             let can_remove = self.guide_inputs.len() > 1;
             let mut populated_order = 0;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
-                let label = if guide_input.query.trim().is_empty() {
-                    guide_input.role.clone()
+                let slot_index = if guide_input.query.trim().is_empty() {
+                    None
                 } else {
                     populated_order += 1;
-                    format!("{populated_order:02} {}", guide_input.role)
+                    Some(populated_order - 1)
                 };
+                let label = slot_index.map_or_else(
+                    || guide_input.role.clone(),
+                    |slot_index| format!("{:02} {}", slot_index + 1, guide_input.role),
+                );
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
                     if drag_response.drag_started() {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    theme::role_label(ui, &label);
+                    if theme::role_label(ui, &label, slot_index == self.active_slot).clicked() {
+                        focused_guide = Some(index);
+                        self.active_section = Section::Guide;
+                        ui.ctx().request_repaint();
+                    }
                     let response =
                         theme::text_input(ui, &mut guide_input.query, "探したい語句・タグ", 330.0);
                     guide_changed |= response.changed();
-                    if response.gained_focus() || response.changed() {
+                    if response.clicked() || response.gained_focus() || response.changed() {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
+                        ui.ctx().request_repaint();
                     }
                     if can_remove
                         && theme::icon_button(

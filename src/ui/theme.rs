@@ -304,14 +304,26 @@ pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
     response
 }
 
-pub fn role_label(ui: &mut Ui, text: &str) {
-    ui.allocate_ui_with_layout(
-        Vec2::new(48.0, 24.0),
-        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| {
-            ui.label(detail(text));
-        },
-    );
+pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
+    let text_color = if selected { ACCENT } else { TEXT };
+    let fill = if selected {
+        SELECTED_BACKGROUND
+    } else {
+        CONTROL
+    };
+    let stroke = if selected { ACCENT } else { BORDER };
+    ui.add(
+        egui::Button::new(
+            RichText::new(text)
+                .size(DETAIL_TEXT_SIZE)
+                .strong()
+                .color(text_color),
+        )
+        .fill(fill)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .min_size(Vec2::new(48.0, 24.0)),
+    )
+    .on_hover_text("この枠の候補を右ペインに表示")
 }
 
 pub fn role_badge_button(ui: &mut Ui, text: &str) -> Response {
@@ -688,6 +700,54 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
 #[cfg(test)]
 mod tests {
     use eframe::egui;
+
+    #[test]
+    fn role_label_responds_to_click() {
+        fn show(context: &egui::Context, events: Vec<egui::Event>) -> (egui::Pos2, bool) {
+            let mut position = None;
+            let mut clicked = false;
+            let _ = context.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let response = super::role_label(ui, "01 反応", false);
+                        position = Some(response.rect.center());
+                        clicked = response.clicked();
+                    });
+                },
+            );
+            (position.unwrap(), clicked)
+        }
+
+        let context = egui::Context::default();
+        let (position, _) = show(&context, Vec::new());
+        show(
+            &context,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let (_, clicked) = show(
+            &context,
+            vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+
+        assert!(clicked);
+    }
 
     #[test]
     fn form_labels_keep_following_controls_aligned_for_different_lengths() {
