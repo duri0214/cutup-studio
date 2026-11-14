@@ -220,7 +220,7 @@ impl CatalogEditor {
         ));
         let previous = self.material_id;
         ui.horizontal(|ui| {
-            ui.label(theme::detail("素材"));
+            theme::form_label(ui, "素材");
             egui::ComboBox::from_id_salt("analysis_material")
                 .selected_text(
                     self.materials
@@ -242,7 +242,7 @@ impl CatalogEditor {
             self.load_selected();
         }
         ui.horizontal(|ui| {
-            ui.label(theme::detail("音声変換"));
+            theme::form_label(ui, "音声変換");
             egui::ComboBox::from_id_salt("audio_converter")
                 .selected_text(if self.audio_conversion {
                     "FFmpeg"
@@ -255,7 +255,7 @@ impl CatalogEditor {
                 });
         });
         ui.horizontal(|ui| {
-            ui.label(theme::detail("音声認識"));
+            theme::form_label(ui, "音声認識");
             egui::ComboBox::from_id_salt("speech_recognizer")
                 .selected_text(if self.speech_recognition {
                     "Whisper"
@@ -296,7 +296,7 @@ impl CatalogEditor {
             }
         }
         ui.horizontal(|ui| {
-            ui.label(theme::detail("テキスト解析"));
+            theme::form_label(ui, "テキスト解析");
             egui::ComboBox::from_id_salt("text_analyzer")
                 .selected_text(if self.ollama_model.is_empty() {
                     "なし"

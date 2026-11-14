@@ -52,6 +52,7 @@ pub const BRAND_TEXT_SIZE: f32 = 25.0;
 pub const BUTTON_TEXT_SIZE: f32 = 12.0;
 pub const TAB_TEXT_SIZE: f32 = 12.0;
 pub const INPUT_HEIGHT: f32 = 30.0;
+pub const FORM_LABEL_WIDTH: f32 = 90.0;
 pub const SUGGESTION_LIST_HEIGHT: f32 = 220.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +173,13 @@ pub fn body_muted(text: impl Into<String>) -> RichText {
 
 pub fn detail(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).size(DETAIL_TEXT_SIZE)
+}
+
+pub fn form_label(ui: &mut Ui, text: &str) {
+    ui.add_sized(
+        [FORM_LABEL_WIDTH, INPUT_HEIGHT],
+        egui::Label::new(detail(text)),
+    );
 }
 
 pub fn detail_muted(text: impl Into<String>) -> RichText {
