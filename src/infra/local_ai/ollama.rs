@@ -1,5 +1,4 @@
 //! Ollama integration restricted to locally stored models and a loopback endpoint.
-use crate::domain::valueobject::catalog::AnalysisCandidate;
 use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error;
@@ -149,18 +148,55 @@ pub fn local_models() -> Result<Vec<String>, OllamaError> {
         .collect())
 }
 
-pub fn summarize(
-    model: &str,
-    candidates: &[AnalysisCandidate],
-) -> Result<AnalysisCandidate, OllamaError> {
-    summarize_at("http://127.0.0.1:11434", model, candidates)
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MetadataSuggestions {
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub roles: Vec<String>,
 }
 
-fn summarize_at(
-    base: &str,
-    model: &str,
-    candidates: &[AnalysisCandidate],
-) -> Result<AnalysisCandidate, OllamaError> {
+impl MetadataSuggestions {
+    pub(crate) fn normalized(mut self) -> Self {
+        for values in [&mut self.keywords, &mut self.tags, &mut self.roles] {
+            *values = values
+                .iter()
+                .flat_map(|value| value.split("」「"))
+                .flat_map(|value| value.split([',', '，', '、']))
+                .map(|value| value.trim().trim_matches(['「', '」']).trim())
+                .filter(|value| !value.is_empty() && value.chars().count() <= 40)
+                .take(5)
+                .map(str::to_owned)
+                .collect();
+        }
+        self
+    }
+}
+
+pub fn suggest_metadata(model: &str, transcript: &str) -> Result<MetadataSuggestions, OllamaError> {
+    let transcript: String = transcript.chars().take(4000).collect();
+    let prompt = format!(
+        "音声文字起こしから素材情報を抽出してください。JSON オブジェクトだけを返し、形式は {{\"keywords\":[\"...\"],\"tags\":[\"...\"],\"roles\":[\"...\"]}}。語句・分類・役割はそれぞれ1件ずつ配列の別の要素にし、1つの文字列に複数の項目や「」をまとめないでください。keywords は話された検索語、tags は内容の短い分類、roles は映像編集上の役割を必ず最適なものから選びます。短い一言でも役割を推定し、疑問や驚きの発話は「反応」、呼びかけや指示は「展開」、場面の導入は「導入」、間をつなぐ語は「つなぎ」とします。説明文は作らないでください。各配列は最大5件、各項目は40文字以内。\n\n文字起こし:\n{transcript}"
+    );
+    let response = generate_at("http://127.0.0.1:11434", model, &prompt)?;
+    parse_metadata_response(&response)
+}
+
+fn parse_metadata_response(response: &str) -> Result<MetadataSuggestions, OllamaError> {
+    let json = response
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let suggestions: MetadataSuggestions =
+        serde_json::from_str(json).map_err(|_| OllamaError::InvalidResponse)?;
+    Ok(suggestions.normalized())
+}
+
+fn generate_at(base: &str, model: &str, prompt: &str) -> Result<String, OllamaError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .proxy(None)
         .max_redirects(0)
@@ -185,14 +221,65 @@ fn summarize_at(
     if !model.is_local() {
         return Err(OllamaError::RemoteModel);
     }
-    let transcript = candidates
-        .iter()
-        .map(|c| c.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut response = agent
+        .post(format!("{base}/api/generate"))
+        .send_json(json!({"model":model.name,"prompt":prompt,"stream":false,"format":"json"}))
+        .map_err(|_| OllamaError::Unavailable)?;
+    let output: Response = response
+        .body_mut()
+        .read_json()
+        .map_err(|_| OllamaError::InvalidResponse)?;
+    if !output.done || output.response.trim().is_empty() {
+        return Err(OllamaError::InvalidResponse);
+    }
+    Ok(output.response)
+}
+
+/// Produce a small set of search terms; catalog metadata stays local.
+pub fn related_terms(model: &str, query: &str) -> Result<Vec<String>, OllamaError> {
+    let query: String = query.chars().take(200).collect();
     let prompt = format!(
-        "以下は音声認識の未確認テキストです。内容と反応の候補を短く日本語で説明してください。不明なことは推測で断定せず、読み取れない場合は分からないと答えてください。Markdown を使わず、平文で答えてください。\n\n{transcript}"
+        "検索語「{query}」と同じ種類の具体的な別の対象名を、日本語で最大10個、各行に1語だけ出力してください。上位概念、形容詞、説明、番号、記号は不要です。"
     );
+    let response = generate_terms_at("http://127.0.0.1:11434", model, &prompt)?;
+    Ok(parse_related_terms(&response))
+}
+
+fn parse_related_terms(response: &str) -> Vec<String> {
+    response
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && line.chars().count() <= 30)
+        .take(10)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn generate_terms_at(base: &str, model: &str, prompt: &str) -> Result<String, OllamaError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .proxy(None)
+        .max_redirects(0)
+        .timeout_global(Some(std::time::Duration::from_secs(120)))
+        .build()
+        .into();
+    let mut response = agent
+        .get(format!("{base}/api/tags"))
+        .call()
+        .map_err(|_| OllamaError::Unavailable)?;
+    let models: Models = response
+        .body_mut()
+        .read_json()
+        .map_err(|_| OllamaError::InvalidResponse)?;
+    let model = models
+        .models
+        .into_iter()
+        .find(|m| {
+            m.name == model || (model.find(':').is_none() && m.name == format!("{model}:latest"))
+        })
+        .ok_or(OllamaError::ModelMissing)?;
+    if !model.is_local() {
+        return Err(OllamaError::RemoteModel);
+    }
     let mut response = agent
         .post(format!("{base}/api/generate"))
         .send_json(json!({"model":model.name,"prompt":prompt,"stream":false}))
@@ -204,82 +291,66 @@ fn summarize_at(
     if !output.done || output.response.trim().is_empty() {
         return Err(OllamaError::InvalidResponse);
     }
-    Ok(AnalysisCandidate {
-        original_text: Some(output.response.clone()),
-        language: None,
-        text: output.response,
-        start_ms: candidates.first().map_or(0, |c| c.start_ms),
-        end_ms: candidates.last().map_or(0, |c| c.end_ms),
-        model: model.name,
-        model_version: model.digest,
-        confidence: None,
-        evidence: Some("文字起こし候補の要約".into()),
-    })
+    Ok(output.response)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn generates_a_separate_candidate_from_local_model_response() {
-        use std::{
-            io::{Read, Write},
-            net::TcpListener,
-        };
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            for body in [
-                r#"{"models":[{"name":"example:latest","digest":"abc","details":{"format":"gguf"}}]}"#,
-                r#"{"response":"反応の候補","done":true}"#,
-            ] {
-                let (mut socket, _) = listener.accept().unwrap();
-                socket
-                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                    .unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0_u8; 8192];
-                loop {
-                    let n = socket.read(&mut buffer).unwrap();
-                    if n == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&buffer[..n]);
-                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&request[..end]);
-                        let length = headers
-                            .lines()
-                            .find_map(|line| {
-                                line.to_ascii_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|v| v.trim().parse::<usize>().ok())
-                            })
-                            .unwrap_or(0);
-                        if request.len() >= end + 4 + length {
-                            break;
-                        }
-                    }
-                }
-                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
-            }
-        });
-        let input = AnalysisCandidate {
-            text: "こんにちは".into(),
-            original_text: Some("こんにちは".into()),
-            language: Some("ja".into()),
-            start_ms: 100,
-            end_ms: 800,
-            model: "whisper".into(),
-            model_version: "hash".into(),
-            confidence: None,
-            evidence: None,
-        };
-        let candidate = summarize_at(&format!("http://{address}"), "example", &[input]).unwrap();
-        assert_eq!(candidate.text, "反応の候補");
-        assert_eq!((candidate.start_ms, candidate.end_ms), (100, 800));
-        assert_eq!(candidate.model_version, "abc");
-        server.join().unwrap();
+    fn metadata_response_accepts_json_and_bounds_each_field() {
+        let mut keywords = vec!["語句".to_owned(); 7];
+        keywords.push("x".repeat(41));
+        let response = serde_json::json!({
+            "keywords": keywords,
+            "tags": ["反応", " "],
+            "roles": ["導入"]
+        })
+        .to_string();
+        let metadata = parse_metadata_response(&format!("```json\n{response}\n```")).unwrap();
+        assert_eq!(metadata.keywords, vec!["語句"; 5]);
+        assert_eq!(metadata.tags, vec!["反応"]);
+        assert_eq!(metadata.roles, vec!["導入"]);
     }
+
+    #[test]
+    fn metadata_response_separates_tags_grouped_in_one_element() {
+        let response = serde_json::json!({
+            "keywords": ["何？"],
+            "tags": ["質問」「確認", "「疑問」、問いかけ"],
+            "roles": ["反応"]
+        })
+        .to_string();
+
+        let metadata = parse_metadata_response(&response).unwrap();
+
+        assert_eq!(metadata.tags, vec!["質問", "確認", "疑問", "問いかけ"]);
+    }
+
+    #[test]
+    fn metadata_response_rejects_unstructured_text() {
+        assert!(matches!(
+            parse_metadata_response("推定された役割は反応です"),
+            Err(OllamaError::InvalidResponse)
+        ));
+    }
+
+    #[test]
+    fn related_terms_are_bounded_and_ignore_blank_or_oversized_lines() {
+        let input = format!(
+            "\n{}\n{}",
+            "長".repeat(31),
+            (0..15)
+                .map(|i| format!("語{i}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let terms = parse_related_terms(&input);
+        assert_eq!(terms.len(), 10);
+        assert_eq!(terms[0], "語0");
+    }
+
     #[test]
     fn rejects_remote_models_even_when_their_name_looks_local() {
         let remote: Model = serde_json::from_str(r#"{"name":"model:latest","digest":"123","remote_host":"https://example.invalid","details":{"format":"gguf"}}"#).unwrap();

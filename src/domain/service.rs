@@ -110,7 +110,7 @@ fn score_candidate(slot: &GuideSlot, material: &CatalogMaterial) -> Option<Candi
             reasons.push(format!("ファイル名「{file_name}」に「{term}」が一致"));
         }
         for (label, values) in [
-            ("検索語句", material.keywords.as_slice()),
+            ("探す語句", material.keywords.as_slice()),
             ("タグ", material.tags.as_slice()),
             ("役割", material.roles.as_slice()),
             ("メモ", std::slice::from_ref(&material.note)),
@@ -201,7 +201,7 @@ mod tests {
         assert!(
             plan.slots[0].candidates[0]
                 .reasons
-                .contains(&"検索語句に「テッカマン」が一致".to_owned())
+                .contains(&"探す語句に「テッカマン」が一致".to_owned())
         );
         assert!(
             plan.slots[0].candidates[0]
