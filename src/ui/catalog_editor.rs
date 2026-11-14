@@ -560,16 +560,17 @@ impl CatalogEditor {
                     }
                     let mut changed = false;
                     for candidate in &mut record.candidates {
-                        ui.label(theme::detail(format!(
-                            "{}–{} ms / {} / {}",
-                            candidate.start_ms,
-                            candidate.end_ms,
-                            candidate.model,
-                            candidate.model_version
-                        )));
                         if let Some(evidence) = &candidate.evidence {
                             ui.label(theme::detail(evidence));
                         }
+                        ui.label(theme::detail(format!(
+                            "素材の先頭から {}.{:03}秒〜{}.{:03}秒",
+                            candidate.start_ms / 1000,
+                            candidate.start_ms % 1000,
+                            candidate.end_ms / 1000,
+                            candidate.end_ms % 1000
+                        )));
+                        ui.label(theme::detail(format!("使用モデル: {}", candidate.model)));
                         if let Some(language) = &candidate.language {
                             ui.label(theme::detail(format!("言語候補: {language}")));
                         }
