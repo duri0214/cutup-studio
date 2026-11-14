@@ -19,7 +19,7 @@ winget install "FFmpeg (Essentials Build)"
 ffmpeg -version
 ```
 
-`winget` を使えない場合は [FFmpeg 配布ページ](https://www.gyan.dev/ffmpeg/builds/) の `ffmpeg-release-essentials.zip` を展開し、`bin\ffmpeg.exe` の絶対パスを控えます。アプリに同梱しません。
+`winget` を使えない場合は [FFmpeg 配布ページ](https://www.gyan.dev/ffmpeg/builds/) の `ffmpeg-release-essentials.zip` を展開し、展開先の `bin` フォルダを Windows のユーザー環境変数 `Path` に追加します。Windows で「環境変数を編集」と検索し、「ユーザー環境変数」の `Path` → `編集` → `新規` から追加して `OK` を押します。ターミナルとアプリを再起動し、PowerShell で `ffmpeg -version` を確認してください。アプリに同梱しません。
 
 ## 2. whisper.cpp と音声認識モデル
 
@@ -96,7 +96,7 @@ Get-ChildItem $env:TEMP -Filter 'Setup Log*.txt' | Sort-Object LastWriteTime -De
 
 ## 4. アプリで使う
 
-`cargo run` で起動して `DEMO` を選ぶと、素材の読み込み後に右側に `素材の情報を登録` が開きます。右側の `解析` タブを選び、`素材` で対象を選びます。画面を閉じた場合は、左側の `素材の情報を登録` ボタンから再び開けます。`音声変換` で `FFmpeg`、`音声認識` で `Whisper` を選びます。説明候補も必要なら `テキスト解析` で `Ollama / gemma4:e2b` を選び、不要なら `なし` にします。モデルの一覧は選択欄を開くと自動で取得します。選択した Whisper と Ollama には `ローカル` と表示されます。Ollama が停止中なら、`テキスト解析` の右にある Ollama のアイコンを押して起動します。Windows では時計の近くの通知領域に Ollama のアイコンが表示されます。`文字起こしを開始` を押すと解析が始まります。
+`cargo run` で起動して `DEMO` を選ぶと、素材の読み込み後に右側に `素材の情報を登録` が開きます。右側の `解析` タブを選び、`素材` で対象を選びます。画面を閉じた場合は、左側の `素材の情報を登録` ボタンから再び開けます。`音声認識` で `Whisper` を選びます。FFmpeg は Whisper の前処理として自動で使います。FFmpeg は PATH から自動検出します。説明候補も必要なら `テキスト解析` で `Ollama / gemma4:e2b` を選び、不要なら `なし` にします。モデルの一覧は選択欄を開くと自動で取得します。選択した Whisper と Ollama には `ローカル` と表示されます。Ollama が停止中なら、`テキスト解析` の右にある Ollama のアイコンを押して起動します。Windows では時計の近くの通知領域に Ollama のアイコンが表示されます。`文字起こしを開始` を押すと解析が始まります。
 
 Ollama のサーバーがすでに動いている場合は、そのサーバーに接続します。通知領域にアイコンがない場合は、別の方法で起動されたサーバーを停止してから、Ollama のアイコンを押してください。
 

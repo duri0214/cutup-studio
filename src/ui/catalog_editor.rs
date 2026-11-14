@@ -54,7 +54,6 @@ pub(super) struct CatalogEditor {
     active_tab: EditorTab,
     keep_open: bool,
     message: Option<(theme::State, String)>,
-    ffmpeg_path: String,
     whisper_path: String,
     model_path: String,
     ollama_model: String,
@@ -62,7 +61,6 @@ pub(super) struct CatalogEditor {
     ollama_models_task: Option<Receiver<Result<OllamaTaskResult, ollama::OllamaError>>>,
     ollama_available: Option<bool>,
     ollama_start_requested: bool,
-    audio_conversion: bool,
     speech_recognition: bool,
     speech_language: SpeechLanguage,
     force_reanalysis: bool,
@@ -96,7 +94,6 @@ impl CatalogEditor {
             active_tab: EditorTab::Search,
             keep_open: false,
             message: None,
-            ffmpeg_path: "ffmpeg".into(),
             whisper_path: default_whisper_path("Release/whisper-cli.exe"),
             model_path: default_whisper_path("ggml-tiny.bin"),
             ollama_model: String::new(),
@@ -104,7 +101,6 @@ impl CatalogEditor {
             ollama_models_task: Some(models_receiver),
             ollama_available: None,
             ollama_start_requested: false,
-            audio_conversion: false,
             speech_recognition: false,
             speech_language: SpeechLanguage::Auto,
             force_reanalysis: false,
@@ -226,10 +222,13 @@ impl CatalogEditor {
 
     fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
         ui.label(theme::body(
-            "選択中の素材をローカルで文字起こしします。結果は手入力の情報と別に保存します。",
+            "選択中の素材を文字起こしします（結果は手入力の情報と別に保存します）",
         ));
         ui.label(theme::body(
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
+        ));
+        ui.label(theme::detail_muted(
+            "① FFmpeg で音声を変換 → ② Whisper で文字起こし → ③ Ollama で説明候補を作成（任意）",
         ));
         let previous = self.material_id;
         ui.horizontal(|ui| {
@@ -254,19 +253,6 @@ impl CatalogEditor {
         if previous != self.material_id {
             self.load_selected();
         }
-        ui.horizontal(|ui| {
-            theme::form_label(ui, "音声変換");
-            egui::ComboBox::from_id_salt("audio_converter")
-                .selected_text(if self.audio_conversion {
-                    "FFmpeg"
-                } else {
-                    "なし"
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.audio_conversion, false, "なし");
-                    ui.selectable_value(&mut self.audio_conversion, true, "FFmpeg");
-                });
-        });
         ui.horizontal(|ui| {
             theme::form_label(ui, "音声認識");
             egui::ComboBox::from_id_salt("speech_recognizer")
@@ -433,7 +419,6 @@ impl CatalogEditor {
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
-                ("音声変換", &mut self.ffmpeg_path),
                 ("音声認識", &mut self.whisper_path),
                 ("音声認識モデル", &mut self.model_path),
             ] {
@@ -456,13 +441,22 @@ impl CatalogEditor {
                 });
             }
         });
-        if self.audio_conversion
-            && self.speech_recognition
-            && (!executable_exists(&self.ffmpeg_path)
-                || !executable_exists(&self.whisper_path)
-                || !PathBuf::from(&self.model_path).is_file())
-        {
-            ui.label(theme::body("必要な実行ファイルまたは音声認識モデルが見つかりません。「実行ファイルとモデルの設定」から選択してください。"));
+        if self.speech_recognition {
+            if !executable_exists("ffmpeg") {
+                theme::state_message(
+                    ui,
+                    theme::State::Attention,
+                    "FFmpeg が見つかりません。README の導入手順を確認し、導入後にアプリを再起動してください。",
+                );
+            }
+            if !executable_exists(&self.whisper_path) || !PathBuf::from(&self.model_path).is_file()
+            {
+                theme::state_message(
+                    ui,
+                    theme::State::Attention,
+                    "Whisper または音声認識モデルが見つかりません。「実行ファイルとモデルの設定」で選択してください。",
+                );
+            }
         }
         if self.analysis_task.is_some() {
             ui.horizontal(|ui| {
@@ -484,9 +478,8 @@ impl CatalogEditor {
                     .add_enabled_ui(
                         self.analysis_task.is_none()
                             && self.material_id.is_some()
-                            && self.audio_conversion
                             && self.speech_recognition
-                            && executable_exists(&self.ffmpeg_path)
+                            && executable_exists("ffmpeg")
                             && executable_exists(&self.whisper_path)
                             && PathBuf::from(&self.model_path).is_file(),
                         |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
@@ -513,7 +506,7 @@ impl CatalogEditor {
                 .filter(|(path, root)| path.starts_with(root));
             if let Some((path, _)) = safe {
                 let config = SttConfig {
-                    ffmpeg: PathBuf::from(&self.ffmpeg_path),
+                    ffmpeg: PathBuf::from("ffmpeg"),
                     whisper: PathBuf::from(&self.whisper_path),
                     model: PathBuf::from(&self.model_path),
                     language: self.speech_language,
@@ -979,7 +972,7 @@ fn default_whisper_path(relative: &str) -> String {
         .unwrap_or_default()
 }
 
-fn executable_exists(value: &str) -> bool {
+pub(super) fn executable_exists(value: &str) -> bool {
     let path = std::path::Path::new(value);
     if value.is_empty() {
         return false;
@@ -1030,6 +1023,30 @@ mod tests {
     use super::*;
     use crate::domain::service::create_plan;
 
+    #[test]
+    fn missing_ffmpeg_does_not_prevent_catalog_search() {
+        const CHILD: &str = "CUTUP_TEST_WITHOUT_FFMPEG";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(!executable_exists("ffmpeg"));
+            editor_saved_material_metadata_survives_reopening_and_produces_candidates();
+            return;
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("ui::catalog_editor::tests::missing_ffmpeg_does_not_prevent_catalog_search")
+            .env(CHILD, "1")
+            .env("PATH", directory.path())
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
     #[test]
     fn summary_markdown_is_readable_without_raw_formatting() {
         let text =

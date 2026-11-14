@@ -40,6 +40,10 @@ pub struct StudioApp {
     active_slot: Option<usize>,
     dragged_guide_index: Option<usize>,
     status: String,
+    export_task: Option<Receiver<Result<String, String>>>,
+    export_error: Option<String>,
+    saved_composition: Option<CompositionRecipe>,
+    confirm_close: bool,
 }
 
 impl StudioApp {
@@ -56,6 +60,10 @@ impl StudioApp {
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
+            export_task: None,
+            export_error: None,
+            saved_composition: None,
+            confirm_close: false,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
         }
     }
@@ -93,6 +101,7 @@ impl StudioApp {
         self.selections.clear();
         self.active_slot = None;
         self.dragged_guide_index = None;
+        self.saved_composition = None;
     }
 
     fn use_demo_catalog(&mut self, context: &egui::Context) {
@@ -295,21 +304,33 @@ impl StudioApp {
         })
     }
 
-    fn save_recipe(&mut self) {
+    fn composition_is_dirty(&self) -> bool {
+        !same_composition(
+            self.current_recipe().as_ref(),
+            self.saved_composition.as_ref(),
+        )
+    }
+
+    fn save_recipe(&mut self) -> bool {
         let Some(recipe) = self.current_recipe() else {
             self.status = "構成設定を保存するには、02で語句を入力してください。".into();
-            return;
+            return false;
         };
         let Some(editor) = &mut self.editor else {
             self.status = "構成設定を保存するには、基準フォルダを開いてください。".into();
-            return;
+            return false;
         };
         match editor.store.save_recipe(&recipe) {
             Ok(()) => {
+                self.saved_composition = Some(recipe);
                 self.status =
                     "構成設定を保存しました。必要なときに03の「読み込み」で復元できます。".into();
+                true
             }
-            Err(error) => self.status = format!("RECIPE ERROR — 構成設定を保存できません: {error}"),
+            Err(error) => {
+                self.status = format!("RECIPE ERROR — 構成設定を保存できません: {error}");
+                false
+            }
         }
     }
 
@@ -363,6 +384,7 @@ impl StudioApp {
                     }
                 }
                 self.active_slot = Some(0);
+                self.saved_composition = self.current_recipe();
                 self.status = if unavailable_count == 0 {
                     format!(
                         "構成設定を読み込みました。{restored_count}件の選択を03で確認できます。"
@@ -408,7 +430,10 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
-        if self.status.starts_with("CATALOG ERROR") || self.status.starts_with("CATALOG EXISTS") {
+        if self.status.starts_with("EXPORT ERROR")
+            || self.status.starts_with("CATALOG ERROR")
+            || self.status.starts_with("CATALOG EXISTS")
+        {
             (theme::State::Error, "ERROR")
         } else if self.catalog_task.is_some() {
             (theme::State::Attention, "SCANNING")
@@ -794,6 +819,65 @@ impl StudioApp {
         }
     }
 
+    fn export_inputs(&self) -> Result<Vec<PathBuf>, String> {
+        let recipe = self
+            .current_recipe()
+            .ok_or("02で素材を選択してください。")?;
+        let catalog = self.catalog.as_ref().ok_or("カタログがありません。")?;
+        crate::infra::export::inputs(catalog, &recipe)
+    }
+
+    fn start_export(&mut self, context: &egui::Context) {
+        let result = self.export_inputs();
+        let inputs = match result {
+            Ok(value) => value,
+            Err(error) => {
+                self.export_error = Some(error.clone());
+                self.status = format!("EXPORT ERROR — {error}");
+                return;
+            }
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("WAVの保存先")
+            .set_file_name("composition.wav")
+            .add_filter("WAV", &["wav"])
+            .save_file()
+        else {
+            return;
+        };
+        let (sender, receiver) = mpsc::channel();
+        let context = context.clone();
+        std::thread::spawn(move || {
+            let result =
+                crate::infra::export::render(std::path::Path::new("ffmpeg"), &inputs, &output)
+                    .map(|()| format!("書き出しました: {}", output.display()));
+            let _ = sender.send(result);
+            context.request_repaint();
+        });
+        self.export_error = None;
+        self.status = "EXPORT — 書き出し中…".into();
+        self.export_task = Some(receiver);
+    }
+
+    fn poll_export(&mut self) {
+        let Some(task) = &self.export_task else {
+            return;
+        };
+        let result = match task.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("書き出し処理が中断されました。".into()),
+        };
+        self.export_task = None;
+        match result {
+            Ok(message) => self.status = message,
+            Err(error) => {
+                self.status = format!("EXPORT ERROR — {error}");
+                self.export_error = Some(error);
+            }
+        }
+    }
+
     fn show_stage(&mut self, ui: &mut Ui) {
         let entries: Vec<_> = self
             .plan
@@ -814,6 +898,7 @@ impl StudioApp {
             .count();
         let mut save_requested = false;
         let mut load_requested = false;
+        let mut export_requested = false;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
@@ -847,13 +932,9 @@ impl StudioApp {
             ));
             ui.add_space(theme::SPACE_SM);
             if entries.is_empty() {
-                ui.add_space(theme::SPACE_XL);
-                ui.horizontal_centered(|ui| {
-                    ui.label(theme::body_muted(
-                        "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
-                    ));
-                });
-                ui.add_space(theme::SPACE_XL);
+                ui.label(theme::body_muted(
+                    "02 / COMPOSITION GUIDE に語句を入力すると構成が表示されます",
+                ));
             }
             for (order, role, candidate) in entries.iter().filter_map(|(order, role, candidate)| {
                 candidate.as_ref().map(|candidate| (order, role, candidate))
@@ -861,7 +942,31 @@ impl StudioApp {
                 theme::selected_summary_item(ui, *order, &candidate.source_path, role);
                 ui.add_space(theme::SPACE_XXS);
             }
+            ui.separator();
+            ui.label(theme::detail_muted(
+                "表示中の構成を順番に連結し、ステレオ WAV として書き出します。",
+            ));
+            let encoder_available = self.editor.is_some()
+                && super::catalog_editor::executable_exists("ffmpeg");
+            if self.editor.is_some() && !encoder_available {
+                theme::state_message(ui, theme::State::Attention, "書き出しには FFmpeg が必要です。README の導入手順を確認し、導入後にアプリを再起動してください。");
+            }
+            if let Some(error) = &self.export_error {
+                theme::state_message(ui, theme::State::Error, error);
+            }
+            if ui
+                .add_enabled_ui(encoder_available && !entries.is_empty() && self.export_task.is_none(), |ui| {
+                    theme::button(ui, "WAVを書き出す", theme::ButtonKind::Normal)
+                })
+                .inner
+                .clicked()
+            {
+                export_requested = true;
+            }
         });
+        if export_requested {
+            self.start_export(ui.ctx());
+        }
         if save_requested {
             self.save_recipe();
         }
@@ -873,7 +978,45 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        if context.input(|input| input.viewport().close_requested()) && self.composition_is_dirty()
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_close = true;
+        }
         self.poll_catalog_task();
+        self.poll_export();
+        if self.confirm_close {
+            egui::Modal::new(egui::Id::new("confirm_close_composition")).show(context, |ui| {
+                ui.label(theme::section_title("未保存の構成"));
+                ui.label("構成に保存していない変更があります。閉じると変更は失われます。");
+                ui.label("WAVへの書き出しは構成の保存にはなりません。");
+                if self.status.starts_with("RECIPE ERROR") {
+                    theme::state_message(ui, theme::State::Error, &self.status);
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled_ui(self.current_recipe().is_some(), |ui| {
+                            theme::button(ui, "保存して終了", theme::ButtonKind::Primary)
+                        })
+                        .inner
+                        .clicked()
+                        && self.save_recipe()
+                    {
+                        self.confirm_close = false;
+                        context.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if theme::button(ui, "保存せず終了", theme::ButtonKind::Normal).clicked()
+                    {
+                        self.confirm_close = false;
+                        self.saved_composition = self.current_recipe();
+                        context.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close = false;
+                    }
+                });
+            });
+        }
         let busy = self.catalog_task.is_some();
         let registering = self.editor.as_ref().is_some_and(|editor| editor.open);
         let mut panel_event = PanelEvent::None;
@@ -949,6 +1092,23 @@ impl eframe::App for StudioApp {
     }
 }
 
+fn same_composition(a: Option<&CompositionRecipe>, b: Option<&CompositionRecipe>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.slots.len() == b.slots.len()
+                && a.slots.iter().zip(&b.slots).all(|(a, b)| {
+                    a.slot.order == b.slot.order
+                        && a.slot.role == b.slot.role
+                        && a.slot.query == b.slot.query
+                        && a.selection.as_ref().map(|s| &s.material_id)
+                            == b.selection.as_ref().map(|s| &s.material_id)
+                })
+        }
+        _ => false,
+    }
+}
+
 fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
@@ -989,6 +1149,76 @@ fn demo_material_root() -> PathBuf {
 mod tests {
     use super::*;
 
+    #[test]
+    fn export_uses_current_selection_without_loading_or_saving_recipe() {
+        use crate::domain::valueobject::{CatalogMaterial, GuideSlot, SlotPlan};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("materials")).unwrap();
+        for name in ["apple.wav", "pear.wav"] {
+            std::fs::write(dir.path().join("materials").join(name), b"audio").unwrap();
+        }
+        let material = |id: &str, name: &str| CatalogMaterial {
+            id: id.into(),
+            source_path: format!("materials/{name}"),
+            keywords: vec![],
+            tags: vec![],
+            roles: vec![],
+            note: String::new(),
+        };
+        let candidate = |id: &str, name: &str| Candidate {
+            material_id: id.into(),
+            source_path: format!("materials/{name}"),
+            score: 1,
+            reasons: vec![],
+            tags: vec![],
+            roles: vec![],
+        };
+        let mut app = StudioApp {
+            catalog: Some(Catalog {
+                schema_version: 1,
+                material_root: dir.path().to_string_lossy().into_owned(),
+                materials: vec![material("1", "apple.wav"), material("2", "pear.wav")],
+            }),
+            catalog_path: None,
+            demo_mode: false,
+            editor: None,
+            catalog_task: None,
+            guide_inputs: vec![],
+            plan: Some(Plan {
+                slots: vec![SlotPlan {
+                    slot: GuideSlot {
+                        id: "slot-1".into(),
+                        order: 1,
+                        role: "導入".into(),
+                        query: "fruit".into(),
+                    },
+                    candidates: vec![],
+                }],
+            }),
+            selections: BTreeMap::new(),
+            active_slot: None,
+            dragged_guide_index: None,
+            status: String::new(),
+            export_task: None,
+            export_error: None,
+            saved_composition: None,
+            confirm_close: false,
+        };
+        app.selections
+            .insert("slot-1".into(), candidate("1", "apple.wav"));
+        assert!(app.export_inputs().unwrap()[0].ends_with("apple.wav"));
+        assert!(app.composition_is_dirty());
+        app.saved_composition = app.current_recipe();
+        assert!(!app.composition_is_dirty());
+        app.selections
+            .insert("slot-1".into(), candidate("2", "pear.wav"));
+        assert!(app.export_inputs().unwrap()[0].ends_with("pear.wav"));
+        assert!(app.composition_is_dirty());
+        assert!(!app.save_recipe());
+        assert!(app.composition_is_dirty());
+        app.selections.clear();
+        assert!(app.export_inputs().unwrap_err().contains("未選択"));
+    }
     #[test]
     fn input_focus_maps_to_populated_slot_even_with_empty_rows() {
         let inputs = vec![
