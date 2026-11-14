@@ -642,13 +642,13 @@ impl StudioApp {
                 theme::state_message(ui, theme::State::Error, &self.status);
             }
             ui.label(theme::detail_muted(
-                "役割を選び、探したい語句・タグを入力します。",
+                "役割を選び、探す語句・タグを入力します。",
             ));
             ui.label(theme::detail_muted(
                 "登録した役割と、入力した語句のいずれかが一致する素材を表示します。同じ素材を複数の枠で選べます。",
             ));
             ui.horizontal_wrapped(|ui| {
-                theme::caption(ui, "ADD SLOT");
+                theme::caption(ui, "使用可能な役割");
                 for role in &available_roles {
                     if theme::role_badge_button(ui, role).clicked() {
                         role_to_add = Some(role.clone());
@@ -702,7 +702,7 @@ impl StudioApp {
                         ui.ctx().request_repaint();
                     }
                     let response =
-                        theme::text_input(ui, &mut guide_input.query, "探したい語句・タグ", 330.0);
+                        theme::text_input(ui, &mut guide_input.query, "探す語句・タグ", 330.0);
                     guide_changed |= response.changed();
                     if response.clicked() || response.gained_focus() || response.changed() {
                         focused_guide = Some(index);
@@ -1466,7 +1466,7 @@ mod tests {
             plan.slots[0].candidates[0]
                 .reasons
                 .iter()
-                .any(|r| r.contains("検索語句") && r.contains("梨"))
+                .any(|r| r.contains("探す語句") && r.contains("梨"))
         );
     }
 

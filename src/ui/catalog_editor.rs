@@ -300,7 +300,7 @@ impl CatalogEditor {
                     .request_repaint_after(std::time::Duration::from_millis(200)),
             }
         }
-        ui.label(theme::body("音声から検索語句を起こし、Ollama でタグと役割を補います。結果を確認してから保存してください。").strong());
+        ui.label(theme::body("音声から探す語句を起こし、Ollama でタグと役割を補います。結果を確認してから保存してください。").strong());
         ui.label(theme::body(
             "開始・終了時刻は入力しません。素材ファイル1本が、そのまま候補の単位です。",
         ));
@@ -762,9 +762,9 @@ impl CatalogEditor {
             }
         }
         ui.label(theme::detail_muted(if self.ollama_model.is_empty() {
-            "実行すると文字起こしが検索語句に入ります。設定で Ollama を選ぶと、タグと役割も補います。"
+            "実行すると文字起こしが探す語句に入ります。設定で Ollama を選ぶと、タグと役割も補います。"
         } else {
-            "実行すると検索語句・タグ・役割に情報を反映します。既存の値に重複しないよう追加します。"
+            "実行すると探す語句・タグ・役割に情報を反映します。既存の値に重複しないよう追加します。"
         }));
         self.show_message(ui);
     }
@@ -876,9 +876,9 @@ impl CatalogEditor {
         let metadata_input_width = (ui.available_width() - 150.0).max(120.0);
         egui::Grid::new("metadata").num_columns(2).show(ui, |ui| {
             for (label, value) in [
-                ("検索語句", &mut self.keywords),
+                ("探す語句", &mut self.keywords),
                 ("タグ", &mut self.tags),
-                ("制作上の役割", &mut self.roles),
+                ("役割", &mut self.roles),
                 ("メモ", &mut self.note),
             ] {
                 ui.label(theme::detail(label));
@@ -887,7 +887,7 @@ impl CatalogEditor {
             }
         });
         ui.label(theme::detail_muted(
-            "複数の検索語句・タグ・役割はカンマ区切りです。",
+            "複数の探す語句・タグ・役割はカンマ区切りです。",
         ));
         ui.separator();
         ui.label(theme::detail_muted(
