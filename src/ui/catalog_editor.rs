@@ -552,6 +552,10 @@ impl CatalogEditor {
                     {
                         ui.label(theme::body("素材が変更されています。再解析してください。"));
                     }
+                    if !record.candidates.is_empty() {
+                        ui.separator();
+                        ui.label(theme::section_title("保存済みの解析結果"));
+                    }
                     let mut changed = false;
                     for candidate in &mut record.candidates {
                         ui.label(theme::detail(format!(
