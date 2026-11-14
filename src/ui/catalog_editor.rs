@@ -1023,7 +1023,7 @@ impl CatalogEditor {
         self.message = None;
     }
 
-    fn has_unsaved_metadata(&self) -> Result<bool, CatalogError> {
+    pub(super) fn has_unsaved_metadata(&self) -> Result<bool, CatalogError> {
         let stored_materials = self.store.search(&SearchFilter::default())?;
         let differs = |id: i64, keywords: &str, tags: &str, roles: &str, note: &str| {
             let current = metadata_from_fields(keywords, tags, roles, note);
@@ -1047,7 +1047,7 @@ impl CatalogEditor {
         Ok(false)
     }
 
-    fn save_all_drafts(&mut self) -> Result<(), CatalogError> {
+    pub(super) fn save_all_drafts(&mut self) -> Result<(), CatalogError> {
         let mut pending = self.drafts.clone();
         if let Some(id) = self.material_id {
             pending.insert(
@@ -1070,7 +1070,7 @@ impl CatalogEditor {
         Ok(())
     }
 
-    fn discard_changes(&mut self) {
+    pub(super) fn discard_changes(&mut self) {
         self.drafts.clear();
         self.load_selected();
     }

@@ -61,6 +61,7 @@ pub struct StudioApp {
     export_error: Option<String>,
     saved_composition: Option<CompositionRecipe>,
     confirm_close: bool,
+    confirm_close_metadata: bool,
     active_section: Section,
     related_task: Option<RelatedTask>,
 }
@@ -88,6 +89,7 @@ impl StudioApp {
             export_error: None,
             saved_composition: None,
             confirm_close: false,
+            confirm_close_metadata: false,
             active_section: Section::Catalog,
             related_task: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
@@ -1072,10 +1074,28 @@ impl eframe::App for StudioApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        if context.input(|input| input.viewport().close_requested()) && self.composition_is_dirty()
-        {
-            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.confirm_close = true;
+        if context.input(|input| input.viewport().close_requested()) {
+            let metadata_dirty = self
+                .editor
+                .as_ref()
+                .map(CatalogEditor::has_unsaved_metadata)
+                .transpose();
+            match metadata_dirty {
+                Ok(Some(true)) => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.confirm_close_metadata = true;
+                }
+                Err(error) => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.status =
+                        format!("CATALOG ERROR — 未保存の素材情報を確認できません: {error}");
+                }
+                _ if self.composition_is_dirty() => {
+                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.confirm_close = true;
+                }
+                _ => {}
+            }
         }
         self.poll_catalog_task();
         self.poll_export();
@@ -1113,7 +1133,49 @@ impl eframe::App for StudioApp {
                 }
             }
         }
-        if self.confirm_close {
+        if self.confirm_close_metadata {
+            egui::Modal::new(egui::Id::new("confirm_exit_catalog_editor")).show(context, |ui| {
+                ui.label(theme::section_title("未保存の素材情報"));
+                ui.label("保存していない素材情報があります。終了前に保存しますか？");
+                if self.status.starts_with("CATALOG ERROR") {
+                    theme::state_message(ui, theme::State::Error, &self.status);
+                }
+                ui.horizontal(|ui| {
+                    let save =
+                        theme::button(ui, "保存して終了", theme::ButtonKind::Primary).clicked();
+                    let discard =
+                        theme::button(ui, "保存せず終了", theme::ButtonKind::Normal).clicked();
+                    if (save || discard)
+                        && let Some(editor) = &mut self.editor
+                    {
+                        let result = if save {
+                            editor.save_all_drafts()
+                        } else {
+                            editor.discard_changes();
+                            Ok(())
+                        };
+                        match result {
+                            Ok(()) => {
+                                self.confirm_close_metadata = false;
+                                if self.composition_is_dirty() {
+                                    self.confirm_close = true;
+                                } else {
+                                    context.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                            }
+                            Err(error) => {
+                                self.status =
+                                    format!("CATALOG ERROR — 素材情報を保存できません: {error}")
+                            }
+                        }
+                    }
+                    if theme::button(ui, "キャンセル", theme::ButtonKind::Normal).clicked() {
+                        self.confirm_close_metadata = false;
+                    }
+                });
+            });
+        }
+        if self.confirm_close && !self.confirm_close_metadata {
             egui::Modal::new(egui::Id::new("confirm_close_composition")).show(context, |ui| {
                 ui.label(theme::section_title("未保存の構成"));
                 ui.label("構成に保存していない変更があります。閉じると変更は失われます。");
@@ -1362,6 +1424,7 @@ mod tests {
             export_error: None,
             saved_composition: None,
             confirm_close: false,
+            confirm_close_metadata: false,
             active_section: Section::Catalog,
             related_task: None,
         };
