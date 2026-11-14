@@ -258,14 +258,17 @@ impl CatalogEditor {
             ui.label(theme::detail("音声認識"));
             egui::ComboBox::from_id_salt("speech_recognizer")
                 .selected_text(if self.speech_recognition {
-                    "whisper.cpp"
+                    "Whisper"
                 } else {
                     "なし"
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.speech_recognition, false, "なし");
-                    ui.selectable_value(&mut self.speech_recognition, true, "whisper.cpp");
+                    ui.selectable_value(&mut self.speech_recognition, true, "Whisper");
                 });
+            if self.speech_recognition {
+                theme::local_badge(ui);
+            }
         });
         if let Some(task) = &self.ollama_models_task {
             match task.try_recv() {
@@ -331,6 +334,7 @@ impl CatalogEditor {
             }
             if !self.ollama_model.is_empty() {
                 ui.label(theme::detail(&self.ollama_model));
+                theme::local_badge(ui);
             }
         });
         if self.ollama_available == Some(false) {
