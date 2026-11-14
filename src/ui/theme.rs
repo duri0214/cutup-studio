@@ -348,30 +348,61 @@ pub fn tab(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, INPUT_HEIGHT), sense);
-    let text_color = if !enabled {
-        state_color(State::Disabled)
+    let fill = if !enabled {
+        PANEL
     } else if selected {
+        SELECTED_BACKGROUND
+    } else if response.hovered() {
+        CONTROL_HOVERED
+    } else {
+        CONTROL
+    };
+    let color = if !enabled {
+        state_color(State::Disabled)
+    } else if selected || response.hovered() {
         state_color(State::Selected)
     } else {
-        MUTED
+        TEXT
     };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(CONTROL_RADIUS),
+        Stroke::new(
+            1.0_f32,
+            color.gamma_multiply(if selected || response.hovered() {
+                0.8
+            } else {
+                0.45
+            }),
+        ),
+        StrokeKind::Inside,
+    );
     ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
+        Pos2::new(rect.left() + SPACE_SM, rect.center().y),
+        Align2::LEFT_CENTER,
         label,
         FontId::proportional(TAB_TEXT_SIZE),
-        text_color,
+        color,
     );
-    if selected && enabled {
-        ui.painter().line_segment(
-            [
-                Pos2::new(rect.left() + SPACE_SM, rect.bottom() - 1.0),
-                Pos2::new(rect.right() - SPACE_SM, rect.bottom() - 1.0),
-            ],
-            Stroke::new(2.0_f32, state_color(State::Selected)),
-        );
-    }
-    response
+    let chevron = Pos2::new(rect.right() - SPACE_SM, rect.center().y);
+    let chevron_stroke = Stroke::new(1.5_f32, color);
+    ui.painter().line_segment(
+        [
+            Pos2::new(chevron.x - 3.0, chevron.y - 4.0),
+            Pos2::new(chevron.x + 1.0, chevron.y),
+        ],
+        chevron_stroke,
+    );
+    ui.painter().line_segment(
+        [
+            Pos2::new(chevron.x + 1.0, chevron.y),
+            Pos2::new(chevron.x - 3.0, chevron.y + 4.0),
+        ],
+        chevron_stroke,
+    );
+    response.on_hover_text("クリックして切り替え")
 }
 
 pub fn text_input(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> Response {
