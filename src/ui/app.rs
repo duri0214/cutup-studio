@@ -947,18 +947,25 @@ impl StudioApp {
                         });
                 });
                 ui.horizontal_wrapped(|ui| {
-                    let source = if editor.ffmpeg_path == "ffmpeg" {
-                        "自動検出".to_owned()
-                    } else {
-                        editor.ffmpeg_path.clone()
-                    };
                     theme::form_label(ui, "実行ファイル");
-                    ui.add_sized([150.0, theme::INPUT_HEIGHT], egui::Label::new(theme::detail_muted(&source)).truncate()).on_hover_text(&source);
-                    if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
-                        && let Some(path) = rfd::FileDialog::new().pick_file()
-                    {
-                        editor.ffmpeg_path = path.to_string_lossy().into_owned();
+                    if ui.add_enabled_ui(!encoder_available, |ui| {
+                        theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal)
+                    }).inner.clicked() {
+                        let mut dialog = rfd::FileDialog::new().set_title("FFmpeg の実行ファイルを選択");
+                        let configured = std::path::Path::new(&editor.ffmpeg_path);
+                        let directory = configured.parent().filter(|path| path.is_dir()).map(std::path::Path::to_path_buf)
+                            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|path| path.join("Microsoft/WinGet/Links")).filter(|path| path.is_dir()));
+                        if let Some(directory) = directory { dialog = dialog.set_directory(directory); }
+                        if let Some(path) = dialog.pick_file() {
+                            editor.ffmpeg_path = path.to_string_lossy().into_owned();
+                        }
                     }
+                    let source = if editor.ffmpeg_path == "ffmpeg" {
+                        if encoder_available { "自動検出" } else { "未検出" }
+                    } else {
+                        editor.ffmpeg_path.as_str()
+                    };
+                    ui.add_sized([150.0, theme::INPUT_HEIGHT], egui::Label::new(theme::detail_muted(source)).truncate()).on_hover_text(source);
                     if editor.ffmpeg_path != "ffmpeg"
                         && theme::button(ui, "自動検出に戻す", theme::ButtonKind::Normal).clicked()
                     {
