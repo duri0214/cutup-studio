@@ -247,13 +247,8 @@ fn badge_with_color(ui: &mut Ui, text: &str, color: Color32) {
         });
 }
 
-pub fn selection_count_badge(ui: &mut Ui, selected: usize, total: usize) {
-    let text = format!("選択 {selected} / {total}");
-    if selected > 0 {
-        state_badge(ui, &text, State::Selected);
-    } else {
-        badge_with_color(ui, &text, MUTED);
-    }
+pub fn selection_count(ui: &mut Ui, selected: usize, total: usize) {
+    ui.label(detail_muted(format!("選択 {selected} / {total}")));
 }
 
 pub fn state_message(ui: &mut Ui, state: State, text: &str) {

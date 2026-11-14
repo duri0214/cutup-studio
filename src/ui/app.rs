@@ -824,15 +824,6 @@ impl StudioApp {
                     let can_load = self.editor.is_some();
                     let can_save = self.plan.is_some() && self.editor.is_some();
                     if ui
-                        .add_enabled_ui(can_load, |ui| {
-                            theme::button(ui, "読み込み", theme::ButtonKind::Normal)
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        load_requested = true;
-                    }
-                    if ui
                         .add_enabled_ui(can_save, |ui| {
                             theme::button(ui, "保存", theme::ButtonKind::Primary)
                         })
@@ -841,7 +832,16 @@ impl StudioApp {
                     {
                         save_requested = true;
                     }
-                    theme::selection_count_badge(ui, selected_count, entries.len());
+                    if ui
+                        .add_enabled_ui(can_load, |ui| {
+                            theme::button(ui, "読み込み", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        load_requested = true;
+                    }
+                    theme::selection_count(ui, selected_count, entries.len());
                 });
             });
             ui.label(theme::detail_muted(
