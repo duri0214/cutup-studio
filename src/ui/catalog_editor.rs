@@ -229,7 +229,9 @@ impl CatalogEditor {
         ui.label(theme::body(
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
         ));
-        ui.label(theme::detail_muted("文字起こしの前に FFmpeg で音声を変換し、Whisper で文字にします。Ollama は説明候補を作ります。"));
+        ui.label(theme::detail_muted(
+            "① FFmpeg で音声を変換 → ② Whisper で文字起こし → ③ Ollama で説明候補を作成（任意）",
+        ));
         let previous = self.material_id;
         ui.horizontal(|ui| {
             theme::form_label(ui, "素材");
