@@ -570,33 +570,55 @@ impl CatalogEditor {
                     }
                     if !record.candidates.is_empty() {
                         ui.separator();
-                        ui.label(theme::section_title("この素材の保存済み解析結果"));
+                        if let Some(material) = self.materials.iter().find(|m| m.id == id) {
+                            ui.label(theme::section_title(format!(
+                                "保存済みの解析結果 — {}",
+                                material.source_path
+                            )));
+                        }
                     }
                     let mut changed = false;
-                    for candidate in &mut record.candidates {
-                        if let Some(evidence) = &candidate.evidence {
-                            ui.label(theme::detail(evidence));
-                        }
-                        ui.label(theme::detail(format!(
-                            "音声内の位置（素材の先頭から約 {:.1}秒〜{:.1}秒）",
-                            candidate.start_ms as f64 / 1000.0,
-                            candidate.end_ms as f64 / 1000.0
-                        )));
-                        ui.label(theme::detail(format!("使用モデル: {}", candidate.model)));
-                        if let Some(language) = &candidate.language {
-                            ui.label(theme::detail(format!("言語候補: {language}")));
-                        }
-                        if let Some(original) = &candidate.original_text
-                            && original != &candidate.text
-                        {
-                            ui.label(theme::detail_muted(format!("生成時: {original}")));
-                        }
+                    for (index, candidate) in record.candidates.iter_mut().enumerate() {
                         changed |= ui
-                            .add_enabled(
-                                self.analysis_task.is_none(),
-                                egui::TextEdit::multiline(&mut candidate.text),
-                            )
-                            .changed();
+                            .push_id(index, |ui| {
+                                if let Some(evidence) = candidate.evidence.as_deref()
+                                    && evidence != "音声からの文字起こし候補"
+                                {
+                                    let label = if evidence == "文字起こし候補の要約" {
+                                        "文字起こしの要約"
+                                    } else {
+                                        evidence
+                                    };
+                                    ui.label(theme::detail(label));
+                                }
+                                let edited = ui
+                                    .add_enabled(
+                                        self.analysis_task.is_none(),
+                                        egui::TextEdit::multiline(&mut candidate.text),
+                                    )
+                                    .changed();
+                                if let Some(original) = &candidate.original_text
+                                    && original != &candidate.text
+                                {
+                                    ui.label(theme::detail_muted(format!("生成時: {original}")));
+                                }
+                                ui.collapsing("解析の詳細", |ui| {
+                                    ui.label(theme::detail(format!(
+                                        "音声内の位置（素材の先頭から約 {:.1}秒〜{:.1}秒）",
+                                        candidate.start_ms as f64 / 1000.0,
+                                        candidate.end_ms as f64 / 1000.0
+                                    )));
+                                    ui.label(theme::detail(format!(
+                                        "使用モデル: {}",
+                                        candidate.model
+                                    )));
+                                    if let Some(language) = &candidate.language {
+                                        ui.label(theme::detail(format!("言語候補: {language}")));
+                                    }
+                                });
+                                edited
+                            })
+                            .inner;
                     }
                     if changed && let Err(e) = self.store.save_analysis(id, &record) {
                         self.message = Some((theme::State::Error, e.to_string()));
