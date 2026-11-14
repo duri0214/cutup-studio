@@ -885,6 +885,18 @@ impl StudioApp {
             .iter()
             .filter(|(_, _, candidate)| candidate.is_some())
             .count();
+        let saved_matches = self
+            .current_recipe()
+            .and_then(|current| {
+                self.editor
+                    .as_ref()?
+                    .store
+                    .load_recipe()
+                    .ok()
+                    .flatten()
+                    .map(|saved| recipes_match(&current, &saved))
+            })
+            .unwrap_or(false);
         let mut save_requested = false;
         let mut load_requested = false;
         let mut export_requested = false;
@@ -935,6 +947,9 @@ impl StudioApp {
             ui.label(theme::detail_muted(
                 "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
             ));
+            if self.editor.is_some() && !saved_matches {
+                ui.label(theme::detail_muted("表示中の構成を保存するか、保存済みの構成を読み込んでください。"));
+            }
             let encoder_available = self.editor.is_some()
                 && super::catalog_editor::executable_exists("ffmpeg");
             if self.editor.is_some() && !encoder_available {
@@ -944,7 +959,7 @@ impl StudioApp {
                 theme::state_message(ui, theme::State::Error, error);
             }
             if ui
-                .add_enabled_ui(encoder_available && self.export_task.is_none(), |ui| {
+                .add_enabled_ui(encoder_available && saved_matches && self.export_task.is_none(), |ui| {
                     theme::button(ui, "WAVを書き出す", theme::ButtonKind::Normal)
                 })
                 .inner
@@ -1044,6 +1059,17 @@ impl eframe::App for StudioApp {
     }
 }
 
+fn recipes_match(current: &CompositionRecipe, saved: &CompositionRecipe) -> bool {
+    !current.slots.is_empty()
+        && current.slots.len() == saved.slots.len()
+        && current.slots.iter().zip(&saved.slots).all(|(a, b)| {
+            a.slot.order == b.slot.order
+                && a.slot.role == b.slot.role
+                && a.slot.query == b.slot.query
+                && a.selection.as_ref().map(|s| &s.material_id)
+                    == b.selection.as_ref().map(|s| &s.material_id)
+        })
+}
 fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
@@ -1084,6 +1110,35 @@ fn demo_material_root() -> PathBuf {
 mod tests {
     use super::*;
 
+    #[test]
+    fn export_requires_current_selection_to_match_saved_recipe() {
+        use crate::domain::valueobject::GuideSlot;
+        let slot = |id: &str| CompositionRecipeSlot {
+            slot: GuideSlot {
+                id: "slot-1".into(),
+                order: 1,
+                role: "導入".into(),
+                query: "rin".into(),
+            },
+            selection: Some(RecipeSelection {
+                material_id: id.into(),
+                score: 1,
+                reasons: vec![],
+            }),
+        };
+        let saved = CompositionRecipe {
+            slots: vec![slot("apple")],
+        };
+        let current = CompositionRecipe {
+            slots: vec![slot("pear")],
+        };
+        assert!(!recipes_match(&current, &saved));
+        assert!(recipes_match(&current, &current));
+        assert!(!recipes_match(
+            &CompositionRecipe { slots: vec![] },
+            &CompositionRecipe { slots: vec![] }
+        ));
+    }
     #[test]
     fn input_focus_maps_to_populated_slot_even_with_empty_rows() {
         let inputs = vec![
