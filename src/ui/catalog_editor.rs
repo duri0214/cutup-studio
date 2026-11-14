@@ -224,7 +224,7 @@ impl CatalogEditor {
 
     fn analysis_controls(&mut self, ui: &mut Ui) -> bool {
         ui.label(theme::body(
-            "選択中の素材をローカルで文字起こしします。結果は手入力の情報と別に保存します。",
+            "選択中の素材を文字起こしします。（結果は手入力の情報と別に保存します。）",
         ));
         ui.label(theme::body(
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
@@ -442,12 +442,22 @@ impl CatalogEditor {
                 });
             }
         });
-        if self.speech_recognition
-            && (!executable_exists(&self.ffmpeg_path)
-                || !executable_exists(&self.whisper_path)
-                || !PathBuf::from(&self.model_path).is_file())
-        {
-            ui.label(theme::body("必要な実行ファイルまたは音声認識モデルが見つかりません。「実行ファイルとモデルの設定」から選択してください。"));
+        if self.speech_recognition {
+            if !executable_exists(&self.ffmpeg_path) {
+                theme::state_message(
+                    ui,
+                    theme::State::Attention,
+                    "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルとモデルの設定」の「FFmpeg（音声変換・書き出し）」で実行ファイルを選択してください。",
+                );
+            }
+            if !executable_exists(&self.whisper_path) || !PathBuf::from(&self.model_path).is_file()
+            {
+                theme::state_message(
+                    ui,
+                    theme::State::Attention,
+                    "Whisper または音声認識モデルが見つかりません。「実行ファイルとモデルの設定」で選択してください。",
+                );
+            }
         }
         if self.analysis_task.is_some() {
             ui.horizontal(|ui| {
