@@ -55,6 +55,8 @@ pub(super) struct CatalogEditor {
     ollama_model: String,
     ollama_models: Vec<String>,
     ollama_models_task: Option<Receiver<Result<Vec<String>, ollama::OllamaError>>>,
+    ollama_available: Option<bool>,
+    ollama_start_requested: bool,
     audio_conversion: bool,
     speech_recognition: bool,
     force_reanalysis: bool,
@@ -94,6 +96,8 @@ impl CatalogEditor {
             ollama_model: String::new(),
             ollama_models: Vec::new(),
             ollama_models_task: Some(models_receiver),
+            ollama_available: None,
+            ollama_start_requested: false,
             audio_conversion: false,
             speech_recognition: false,
             force_reanalysis: false,
@@ -264,10 +268,17 @@ impl CatalogEditor {
             match task.try_recv() {
                 Ok(Ok(models)) => {
                     self.ollama_models = models;
+                    self.ollama_available = Some(true);
+                    self.ollama_start_requested = false;
                     self.ollama_models_task = None;
                 }
-                Ok(Err(_)) => {
+                Ok(Err(error)) => {
                     self.ollama_models.clear();
+                    self.ollama_available = Some(false);
+                    if self.ollama_start_requested {
+                        self.message = Some((theme::State::Error, error.to_string()));
+                    }
+                    self.ollama_start_requested = false;
                     self.ollama_models_task = None;
                 }
                 Err(TryRecvError::Disconnected) => {
@@ -310,6 +321,7 @@ impl CatalogEditor {
             {
                 let (sender, receiver) = mpsc::channel();
                 self.ollama_models_task = Some(receiver);
+                self.ollama_start_requested = false;
                 std::thread::spawn(move || {
                     let _ = sender.send(ollama::local_models());
                 });
@@ -318,6 +330,29 @@ impl CatalogEditor {
                 ui.label(theme::detail(&self.ollama_model));
             }
         });
+        if self.ollama_available == Some(false) {
+            ui.label(theme::body(
+                "Ollama に接続できません。使わない場合は「なし」で続けられます。",
+            ));
+            if ui
+                .add_enabled_ui(self.ollama_models_task.is_none(), |ui| {
+                    theme::button(ui, "Ollama を起動", theme::ButtonKind::Normal)
+                })
+                .inner
+                .clicked()
+            {
+                let (sender, receiver) = mpsc::channel();
+                self.ollama_models_task = Some(receiver);
+                self.ollama_start_requested = true;
+                std::thread::spawn(move || {
+                    let _ = sender.send(ollama::start_and_list_models());
+                });
+            }
+        } else if self.ollama_available == Some(true) && self.ollama_models.is_empty() {
+            ui.label(theme::body(
+                "Ollama にローカルモデルがありません。「なし」で文字起こしできます。",
+            ));
+        }
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
                 ("音声変換", &mut self.ffmpeg_path),

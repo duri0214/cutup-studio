@@ -14,6 +14,45 @@ pub enum OllamaError {
     RemoteModel,
     #[error("Ollama の応答を読み取れません")]
     InvalidResponse,
+    #[error("Ollama を起動できません。Ollama がインストールされているか確認してください")]
+    StartFailed,
+}
+
+pub fn start_and_list_models() -> Result<Vec<String>, OllamaError> {
+    if let Ok(models) = local_models() {
+        return Ok(models);
+    }
+    let executable = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("Programs/Ollama/ollama.exe"))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| "ollama".into());
+    let mut command = std::process::Command::new(executable);
+    command
+        .arg("serve")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command.spawn().map_err(|_| OllamaError::StartFailed)?;
+    for _ in 0..20 {
+        if let Ok(models) = local_models() {
+            return Ok(models);
+        }
+        if child
+            .try_wait()
+            .map_err(|_| OllamaError::StartFailed)?
+            .is_some()
+        {
+            return local_models().map_err(|_| OllamaError::StartFailed);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Err(OllamaError::Unavailable)
 }
 
 #[derive(Deserialize)]
