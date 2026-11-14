@@ -53,6 +53,10 @@ pub(super) struct CatalogEditor {
     whisper_path: String,
     model_path: String,
     ollama_model: String,
+    ollama_models: Vec<String>,
+    ollama_models_task: Option<Receiver<Result<Vec<String>, ollama::OllamaError>>>,
+    audio_conversion: bool,
+    speech_recognition: bool,
     force_reanalysis: bool,
     analysis_task: Option<Receiver<(i64, AnalysisRecord)>>,
     analysis_cancel: Option<Arc<AtomicBool>>,
@@ -64,6 +68,10 @@ impl CatalogEditor {
         let materials = store.materials()?;
         let stored_materials = store.search(&SearchFilter::default())?;
         let material_id = materials.first().map(|material| material.id);
+        let (models_sender, models_receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = models_sender.send(ollama::local_models());
+        });
         let mut editor = Self {
             store,
             open: true,
@@ -81,9 +89,13 @@ impl CatalogEditor {
             keep_open: false,
             message: None,
             ffmpeg_path: "ffmpeg".into(),
-            whisper_path: "whisper-cli".into(),
-            model_path: String::new(),
+            whisper_path: default_whisper_path("Release/whisper-cli.exe"),
+            model_path: default_whisper_path("ggml-tiny.bin"),
             ollama_model: String::new(),
+            ollama_models: Vec::new(),
+            ollama_models_task: Some(models_receiver),
+            audio_conversion: false,
+            speech_recognition: false,
             force_reanalysis: false,
             analysis_task: None,
             analysis_cancel: None,
@@ -222,16 +234,122 @@ impl CatalogEditor {
         if previous != self.material_id {
             self.load_selected();
         }
-        for (label, value) in [
-            ("FFmpeg", &mut self.ffmpeg_path),
-            ("whisper-cli", &mut self.whisper_path),
-            ("Whisper モデル", &mut self.model_path),
-            ("Ollama モデル（任意）", &mut self.ollama_model),
-        ] {
-            ui.horizontal(|ui| {
-                ui.label(theme::detail(label));
-                theme::text_input(ui, value, "実行ファイルまたはモデルのパス", 420.0);
-            });
+        ui.horizontal(|ui| {
+            ui.label(theme::detail("音声変換"));
+            egui::ComboBox::from_id_salt("audio_converter")
+                .selected_text(if self.audio_conversion {
+                    "FFmpeg"
+                } else {
+                    "なし"
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.audio_conversion, false, "なし");
+                    ui.selectable_value(&mut self.audio_conversion, true, "FFmpeg");
+                });
+        });
+        ui.horizontal(|ui| {
+            ui.label(theme::detail("音声認識"));
+            egui::ComboBox::from_id_salt("speech_recognizer")
+                .selected_text(if self.speech_recognition {
+                    "whisper.cpp"
+                } else {
+                    "なし"
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.speech_recognition, false, "なし");
+                    ui.selectable_value(&mut self.speech_recognition, true, "whisper.cpp");
+                });
+        });
+        if let Some(task) = &self.ollama_models_task {
+            match task.try_recv() {
+                Ok(Ok(models)) => {
+                    self.ollama_models = models;
+                    self.ollama_models_task = None;
+                }
+                Ok(Err(_)) => {
+                    self.ollama_models.clear();
+                    self.ollama_models_task = None;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.ollama_models_task = None;
+                }
+                Err(TryRecvError::Empty) => ui
+                    .ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(200)),
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label(theme::detail("テキスト解析"));
+            egui::ComboBox::from_id_salt("text_analyzer")
+                .selected_text(if self.ollama_model.is_empty() {
+                    "なし"
+                } else {
+                    "Ollama"
+                })
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.ollama_model.is_empty(), "なし")
+                        .clicked()
+                    {
+                        self.ollama_model.clear();
+                    }
+                    for model in &self.ollama_models {
+                        if ui
+                            .selectable_label(
+                                self.ollama_model == *model,
+                                format!("Ollama / {model}"),
+                            )
+                            .clicked()
+                        {
+                            self.ollama_model.clone_from(model);
+                        }
+                    }
+                });
+            if theme::button(ui, "モデルを更新", theme::ButtonKind::Normal).clicked()
+                && self.ollama_models_task.is_none()
+            {
+                let (sender, receiver) = mpsc::channel();
+                self.ollama_models_task = Some(receiver);
+                std::thread::spawn(move || {
+                    let _ = sender.send(ollama::local_models());
+                });
+            }
+            if !self.ollama_model.is_empty() {
+                ui.label(theme::detail(&self.ollama_model));
+            }
+        });
+        ui.collapsing("実行ファイルとモデルの設定", |ui| {
+            for (label, value) in [
+                ("音声変換", &mut self.ffmpeg_path),
+                ("音声認識", &mut self.whisper_path),
+                ("音声認識モデル", &mut self.model_path),
+            ] {
+                ui.horizontal(|ui| {
+                    ui.label(theme::detail(label));
+                    ui.add_sized(
+                        [250.0, 22.0],
+                        egui::Label::new(theme::detail_muted(if value.is_empty() {
+                            "未選択"
+                        } else {
+                            value.as_str()
+                        }))
+                        .truncate(),
+                    );
+                    if theme::button(ui, "選択", theme::ButtonKind::Normal).clicked()
+                        && let Some(path) = rfd::FileDialog::new().pick_file()
+                    {
+                        *value = path.to_string_lossy().into_owned();
+                    }
+                });
+            }
+        });
+        if self.audio_conversion
+            && self.speech_recognition
+            && (!executable_exists(&self.ffmpeg_path)
+                || !executable_exists(&self.whisper_path)
+                || !PathBuf::from(&self.model_path).is_file())
+        {
+            ui.label(theme::body("必要な実行ファイルまたは音声認識モデルが見つかりません。「実行ファイルとモデルの設定」から選択してください。"));
         }
         if self.analysis_task.is_some() {
             ui.label(theme::body("解析中…"));
@@ -247,7 +365,13 @@ impl CatalogEditor {
         ui.checkbox(&mut self.force_reanalysis, "同じ素材と設定でも再解析する");
         if ui
             .add_enabled_ui(
-                self.analysis_task.is_none() && self.material_id.is_some(),
+                self.analysis_task.is_none()
+                    && self.material_id.is_some()
+                    && self.audio_conversion
+                    && self.speech_recognition
+                    && executable_exists(&self.ffmpeg_path)
+                    && executable_exists(&self.whisper_path)
+                    && PathBuf::from(&self.model_path).is_file(),
                 |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
             )
             .inner
@@ -646,6 +770,34 @@ fn split(text: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn default_whisper_path(relative: &str) -> String {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("cutup-studio/whisper").join(relative))
+        .filter(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn executable_exists(value: &str) -> bool {
+    let path = std::path::Path::new(value);
+    if value.is_empty() {
+        return false;
+    }
+    if path.is_file() {
+        return true;
+    }
+    if path.components().count() != 1 {
+        return false;
+    }
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| {
+            let candidate = dir.join(value);
+            candidate.is_file() || (cfg!(windows) && candidate.with_extension("exe").is_file())
+        })
+    })
 }
 
 fn nonempty(text: &str) -> Option<&str> {

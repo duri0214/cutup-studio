@@ -50,6 +50,29 @@ struct Response {
     done: bool,
 }
 
+pub fn local_models() -> Result<Vec<String>, OllamaError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .proxy(None)
+        .max_redirects(0)
+        .timeout_global(Some(std::time::Duration::from_secs(2)))
+        .build()
+        .into();
+    let mut response = agent
+        .get("http://127.0.0.1:11434/api/tags")
+        .call()
+        .map_err(|_| OllamaError::Unavailable)?;
+    let models: Models = response
+        .body_mut()
+        .read_json()
+        .map_err(|_| OllamaError::InvalidResponse)?;
+    Ok(models
+        .models
+        .into_iter()
+        .filter(Model::is_local)
+        .map(|m| m.name)
+        .collect())
+}
+
 pub fn summarize(
     model: &str,
     candidates: &[AnalysisCandidate],
