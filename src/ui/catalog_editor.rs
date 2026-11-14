@@ -1120,7 +1120,27 @@ impl Drop for CatalogEditor {
 }
 
 fn append_metadata_values(target: &mut String, additions: &[String]) {
-    let mut values = split(target);
+    let mut values = Vec::new();
+    for value in split(target) {
+        let parts: Vec<_> = value.split("」「").collect();
+        if parts.len() > 1
+            && parts.iter().all(|part| {
+                let part = normalize_metadata_value(part);
+                !part.is_empty()
+                    && additions
+                        .iter()
+                        .any(|addition| normalize_metadata_value(addition) == part)
+            })
+        {
+            values.extend(
+                parts
+                    .into_iter()
+                    .map(|part| part.trim().trim_matches(['「', '」']).trim().to_owned()),
+            );
+        } else {
+            values.push(value);
+        }
+    }
     for addition in additions.iter().map(|value| value.trim()) {
         if !addition.is_empty()
             && !values
@@ -1484,7 +1504,7 @@ mod tests {
         let mut editor = CatalogEditor::with_settings(store, EditorSettings::default()).unwrap();
         let id = editor.material_id.unwrap();
         editor.keywords = "手入力語".into();
-        editor.tags = "手入力タグ".into();
+        editor.tags = "手入力タグ, 質問」「確認, 手動」「入力".into();
         editor.roles = "導入".into();
         editor.note = "利用者のメモ".into();
         editor.apply_suggestions(
@@ -1492,12 +1512,17 @@ mod tests {
             "なに?",
             Some(&ollama::MetadataSuggestions {
                 keywords: vec!["なに".into(), "補助キーワード".into()],
-                tags: vec!["反応".into(), "手入力タグ".into()],
+                tags: vec![
+                    "反応".into(),
+                    "手入力タグ".into(),
+                    "質問".into(),
+                    "確認".into(),
+                ],
                 roles: vec!["リアクション".into()],
             }),
         );
         assert_eq!(editor.keywords, "手入力語, なに?, 補助キーワード");
-        assert_eq!(editor.tags, "手入力タグ, 反応");
+        assert_eq!(editor.tags, "手入力タグ, 質問, 確認, 手動」「入力, 反応");
         assert_eq!(editor.roles, "導入, リアクション");
         assert_eq!(editor.note, "利用者のメモ");
     }
