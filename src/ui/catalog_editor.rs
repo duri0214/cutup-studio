@@ -117,11 +117,16 @@ impl CatalogEditor {
         let mut event = PanelEvent::None;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(theme::caption_text("素材の情報を登録"));
+                ui.label(theme::section_title("素材の情報を登録"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled_ui(self.analysis_task.is_none(), |ui| {
-                            theme::button(ui, "01へ戻る", theme::ButtonKind::Normal)
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Close,
+                                "閉じる（01へ戻る）",
+                                theme::ButtonKind::Normal,
+                            )
                         })
                         .inner
                         .clicked()

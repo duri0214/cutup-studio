@@ -819,7 +819,7 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
-                theme::caption(ui, "03 / COMPOSITION");
+                ui.label(theme::section_title("03 / COMPOSITION"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let can_load = self.editor.is_some();
                     let can_save = self.plan.is_some() && self.editor.is_some();
@@ -939,7 +939,7 @@ impl eframe::App for StudioApp {
 fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
-        theme::caption(ui, title);
+        ui.label(theme::section_title(title));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             theme::traffic_light(ui, signal).on_hover_text(detail);
         });

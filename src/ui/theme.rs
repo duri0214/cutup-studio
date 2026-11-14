@@ -59,6 +59,7 @@ pub enum ActionIcon {
     New,
     Open,
     Delete,
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +183,10 @@ pub fn caption_text(text: impl Into<String>) -> RichText {
         .size(CAPTION_TEXT_SIZE)
         .strong()
         .color(MUTED)
+}
+
+pub fn section_title(text: impl Into<String>) -> RichText {
+    body(text).strong().color(TEXT)
 }
 
 pub fn item_title(text: impl Into<String>) -> RichText {
@@ -650,6 +655,9 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         )),
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))
+        }
+        ActionIcon::Close => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/x.svg"))
         }
     }
 }
