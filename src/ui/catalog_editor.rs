@@ -292,10 +292,7 @@ impl CatalogEditor {
                 });
             if self.speech_recognition {
                 theme::local_label(ui);
-            }
-        });
-        if self.speech_recognition {
-            ui.horizontal(|ui| {
+                ui.add_space(theme::SPACE_SM);
                 theme::form_label(ui, "音声の言語");
                 egui::ComboBox::from_id_salt("speech_language")
                     .selected_text(match self.speech_language {
@@ -314,8 +311,8 @@ impl CatalogEditor {
                             "日本語",
                         );
                     });
-            });
-        }
+            }
+        });
         if let Some(task) = &self.ollama_models_task {
             match task.try_recv() {
                 Ok(Ok(result)) => {
