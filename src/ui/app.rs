@@ -817,9 +817,8 @@ impl StudioApp {
                 .as_ref()
                 .ok_or("カタログがありません".to_owned())?;
             crate::infra::export::inputs(catalog, &recipe)
-                .map(|inputs| (inputs, PathBuf::from(&editor.ffmpeg_path)))
         })();
-        let (inputs, ffmpeg) = match result {
+        let inputs = match result {
             Ok(value) => value,
             Err(error) => {
                 self.export_error = Some(error.clone());
@@ -838,8 +837,9 @@ impl StudioApp {
         let (sender, receiver) = mpsc::channel();
         let context = context.clone();
         std::thread::spawn(move || {
-            let result = crate::infra::export::render(&ffmpeg, &inputs, &output)
-                .map(|()| format!("書き出しました: {}", output.display()));
+            let result =
+                crate::infra::export::render(std::path::Path::new("ffmpeg"), &inputs, &output)
+                    .map(|()| format!("書き出しました: {}", output.display()));
             let _ = sender.send(result);
             context.request_repaint();
         });
@@ -935,47 +935,10 @@ impl StudioApp {
             ui.label(theme::detail_muted(
                 "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
             ));
-            let mut encoder_available = false;
-            if let Some(editor) = &mut self.editor {
-                encoder_available = super::catalog_editor::executable_exists(&editor.ffmpeg_path);
-                ui.horizontal(|ui| {
-                    theme::form_label(ui, "音声エンコード");
-                    egui::ComboBox::from_id_salt("export_encoder")
-                        .selected_text(if encoder_available { "FFmpeg" } else { "なし" })
-                        .show_ui(ui, |ui| {
-                            ui.add_enabled(encoder_available, egui::Label::new("FFmpeg"));
-                        });
-                });
-                ui.horizontal_wrapped(|ui| {
-                    theme::form_label(ui, "実行ファイル");
-                    if ui.add_enabled_ui(!encoder_available, |ui| {
-                        theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal)
-                    }).inner.clicked() {
-                        let mut dialog = rfd::FileDialog::new().set_title("FFmpeg の実行ファイルを選択");
-                        let configured = std::path::Path::new(&editor.ffmpeg_path);
-                        let directory = configured.parent().filter(|path| path.is_dir()).map(std::path::Path::to_path_buf)
-                            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|path| path.join("Microsoft/WinGet/Links")).filter(|path| path.is_dir()));
-                        if let Some(directory) = directory { dialog = dialog.set_directory(directory); }
-                        if let Some(path) = dialog.pick_file() {
-                            editor.ffmpeg_path = path.to_string_lossy().into_owned();
-                        }
-                    }
-                    let source = if editor.ffmpeg_path == "ffmpeg" {
-                        if encoder_available { "自動検出" } else { "未検出" }
-                    } else {
-                        editor.ffmpeg_path.as_str()
-                    };
-                    ui.add_sized([150.0, theme::INPUT_HEIGHT], egui::Label::new(theme::detail_muted(source)).truncate()).on_hover_text(source);
-                    if editor.ffmpeg_path != "ffmpeg"
-                        && theme::button(ui, "自動検出に戻す", theme::ButtonKind::Normal).clicked()
-                    {
-                        editor.ffmpeg_path = "ffmpeg".into();
-                    }
-                });
-                encoder_available = super::catalog_editor::executable_exists(&editor.ffmpeg_path);
-                if !encoder_available {
-                    theme::state_message(ui, theme::State::Attention, "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルを選択」で指定してください。");
-                }
+            let encoder_available = self.editor.is_some()
+                && super::catalog_editor::executable_exists("ffmpeg");
+            if self.editor.is_some() && !encoder_available {
+                theme::state_message(ui, theme::State::Attention, "書き出しには FFmpeg が必要です。README の導入手順を確認し、導入後にアプリを再起動してください。");
             }
             if let Some(error) = &self.export_error {
                 theme::state_message(ui, theme::State::Error, error);

@@ -54,7 +54,6 @@ pub(super) struct CatalogEditor {
     active_tab: EditorTab,
     keep_open: bool,
     message: Option<(theme::State, String)>,
-    pub(super) ffmpeg_path: String,
     whisper_path: String,
     model_path: String,
     ollama_model: String,
@@ -95,7 +94,6 @@ impl CatalogEditor {
             active_tab: EditorTab::Search,
             keep_open: false,
             message: None,
-            ffmpeg_path: "ffmpeg".into(),
             whisper_path: default_whisper_path("Release/whisper-cli.exe"),
             model_path: default_whisper_path("ggml-tiny.bin"),
             ollama_model: String::new(),
@@ -421,7 +419,6 @@ impl CatalogEditor {
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
-                ("音声変換・書き出し", &mut self.ffmpeg_path),
                 ("音声認識", &mut self.whisper_path),
                 ("音声認識モデル", &mut self.model_path),
             ] {
@@ -445,11 +442,11 @@ impl CatalogEditor {
             }
         });
         if self.speech_recognition {
-            if !executable_exists(&self.ffmpeg_path) {
+            if !executable_exists("ffmpeg") {
                 theme::state_message(
                     ui,
                     theme::State::Attention,
-                    "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルとモデルの設定」の「音声変換・書き出し」で実行ファイルを選択してください。",
+                    "FFmpeg が見つかりません。README の導入手順を確認し、導入後にアプリを再起動してください。",
                 );
             }
             if !executable_exists(&self.whisper_path) || !PathBuf::from(&self.model_path).is_file()
@@ -482,7 +479,7 @@ impl CatalogEditor {
                         self.analysis_task.is_none()
                             && self.material_id.is_some()
                             && self.speech_recognition
-                            && executable_exists(&self.ffmpeg_path)
+                            && executable_exists("ffmpeg")
                             && executable_exists(&self.whisper_path)
                             && PathBuf::from(&self.model_path).is_file(),
                         |ui| theme::button(ui, "文字起こしを開始", theme::ButtonKind::Primary),
@@ -509,7 +506,7 @@ impl CatalogEditor {
                 .filter(|(path, root)| path.starts_with(root));
             if let Some((path, _)) = safe {
                 let config = SttConfig {
-                    ffmpeg: PathBuf::from(&self.ffmpeg_path),
+                    ffmpeg: PathBuf::from("ffmpeg"),
                     whisper: PathBuf::from(&self.whisper_path),
                     model: PathBuf::from(&self.model_path),
                     language: self.speech_language,
