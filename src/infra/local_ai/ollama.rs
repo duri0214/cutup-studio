@@ -39,17 +39,32 @@ fn executable() -> Option<std::path::PathBuf> {
 }
 
 pub fn is_installed() -> bool {
-    executable().is_some()
+    launch_executable().is_some()
 }
 
-pub fn start_and_list_models() -> Result<Vec<String>, OllamaError> {
-    if let Ok(models) = local_models() {
-        return Ok(models);
+fn launch_executable() -> Option<std::path::PathBuf> {
+    let executable = executable()?;
+    if cfg!(windows) {
+        let app = executable.with_file_name("ollama app.exe");
+        app.is_file().then_some(app)
+    } else {
+        Some(executable)
     }
-    let executable = executable().ok_or(OllamaError::StartFailed)?;
+}
+
+pub enum StartOutcome {
+    Started(Vec<String>),
+    AlreadyRunning(Vec<String>),
+}
+
+pub fn start_and_list_models() -> Result<StartOutcome, OllamaError> {
+    if let Ok(models) = local_models() {
+        return Ok(StartOutcome::AlreadyRunning(models));
+    }
+    let executable = launch_executable().ok_or(OllamaError::StartFailed)?;
     let mut command = std::process::Command::new(executable);
     command
-        .arg("serve")
+        .arg(if cfg!(windows) { "hidden" } else { "serve" })
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -61,14 +76,16 @@ pub fn start_and_list_models() -> Result<Vec<String>, OllamaError> {
     let mut child = command.spawn().map_err(|_| OllamaError::StartFailed)?;
     for _ in 0..20 {
         if let Ok(models) = local_models() {
-            return Ok(models);
+            return Ok(StartOutcome::Started(models));
         }
         if child
             .try_wait()
             .map_err(|_| OllamaError::StartFailed)?
             .is_some()
         {
-            return local_models().map_err(|_| OllamaError::StartFailed);
+            return local_models()
+                .map(StartOutcome::Started)
+                .map_err(|_| OllamaError::StartFailed);
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }

@@ -33,6 +33,11 @@ pub(super) enum PanelEvent {
     Closed,
 }
 
+enum OllamaTaskResult {
+    Refreshed(Vec<String>),
+    Started(ollama::StartOutcome),
+}
+
 pub(super) struct CatalogEditor {
     pub store: SqliteCatalog,
     pub open: bool,
@@ -54,7 +59,7 @@ pub(super) struct CatalogEditor {
     model_path: String,
     ollama_model: String,
     ollama_models: Vec<String>,
-    ollama_models_task: Option<Receiver<Result<Vec<String>, ollama::OllamaError>>>,
+    ollama_models_task: Option<Receiver<Result<OllamaTaskResult, ollama::OllamaError>>>,
     ollama_available: Option<bool>,
     ollama_start_requested: bool,
     audio_conversion: bool,
@@ -72,7 +77,7 @@ impl CatalogEditor {
         let material_id = materials.first().map(|material| material.id);
         let (models_sender, models_receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = models_sender.send(ollama::local_models());
+            let _ = models_sender.send(ollama::local_models().map(OllamaTaskResult::Refreshed));
         });
         let mut editor = Self {
             store,
@@ -278,18 +283,35 @@ impl CatalogEditor {
         });
         if let Some(task) = &self.ollama_models_task {
             match task.try_recv() {
-                Ok(Ok(models)) => {
+                Ok(Ok(result)) => {
+                    let (models, message) = match result {
+                        OllamaTaskResult::Refreshed(models) => (models, None),
+                        OllamaTaskResult::Started(ollama::StartOutcome::Started(models)) => {
+                            (models, Some("Ollama を起動しました。"))
+                        }
+                        OllamaTaskResult::Started(ollama::StartOutcome::AlreadyRunning(models)) => {
+                            (
+                                models,
+                                Some(
+                                    "Ollama は既に起動しています。通知領域にアイコンがない場合は、既存のサーバーを停止してから再度起動してください。",
+                                ),
+                            )
+                        }
+                    };
+                    if !self.ollama_model.is_empty() && !models.contains(&self.ollama_model) {
+                        self.ollama_model.clear();
+                    }
                     self.ollama_models = models;
                     self.ollama_available = Some(true);
-                    if self.ollama_start_requested {
-                        self.message =
-                            Some((theme::State::Ready, "Ollama を利用できます。".into()));
+                    if let Some(message) = message {
+                        self.message = Some((theme::State::Ready, message.into()));
                     }
                     self.ollama_start_requested = false;
                     self.ollama_models_task = None;
                 }
                 Ok(Err(error)) => {
                     self.ollama_models.clear();
+                    self.ollama_model.clear();
                     self.ollama_available = Some(false);
                     if self.ollama_start_requested {
                         self.message = Some((theme::State::Error, error.to_string()));
@@ -345,7 +367,7 @@ impl CatalogEditor {
                 self.ollama_start_requested = false;
                 ui.ctx().request_repaint();
                 std::thread::spawn(move || {
-                    let _ = sender.send(ollama::local_models());
+                    let _ = sender.send(ollama::local_models().map(OllamaTaskResult::Refreshed));
                 });
             }
             let installed = ollama::is_installed();
@@ -371,7 +393,8 @@ impl CatalogEditor {
                 self.ollama_start_requested = true;
                 self.message = Some((theme::State::Ready, "Ollama を起動しています。".into()));
                 std::thread::spawn(move || {
-                    let _ = sender.send(ollama::start_and_list_models());
+                    let _ =
+                        sender.send(ollama::start_and_list_models().map(OllamaTaskResult::Started));
                 });
             }
             if self.ollama_available == Some(true) && self.ollama_models.is_empty() {
@@ -618,7 +641,9 @@ impl CatalogEditor {
                                 if let Some(original) = &candidate.original_text
                                     && original != &candidate.text
                                 {
-                                    ui.label(theme::detail_muted(format!("生成時: {original}")));
+                                    ui.label(theme::detail_muted(format!(
+                                        "当初の生成結果: {original}"
+                                    )));
                                 }
                                 ui.collapsing("解析の詳細", |ui| {
                                     ui.label(theme::detail(format!(
@@ -907,6 +932,35 @@ fn nonempty(text: &str) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::domain::service::create_plan;
+
+    #[test]
+    fn unavailable_ollama_clears_selected_model_and_available_models() {
+        let temp = tempfile::tempdir().unwrap();
+        let materials = temp.path().join("materials");
+        std::fs::create_dir(&materials).unwrap();
+        std::fs::write(materials.join("sample.wav"), b"local media fixture").unwrap();
+        let path = temp.path().join("catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
+        store.rescan().unwrap();
+        let mut editor = CatalogEditor::new(store).unwrap();
+        editor.active_tab = EditorTab::Analysis;
+        editor.ollama_model = "gemma4:e2b".into();
+        editor.ollama_models = vec!["gemma4:e2b".into()];
+        let (sender, receiver) = mpsc::channel();
+        editor.ollama_models_task = Some(receiver);
+        sender.send(Err(ollama::OllamaError::Unavailable)).unwrap();
+
+        let context = egui::Context::default();
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                editor.controls(ui);
+            });
+        });
+
+        assert!(editor.ollama_model.is_empty());
+        assert!(editor.ollama_models.is_empty());
+        assert_eq!(editor.ollama_available, Some(false));
+    }
 
     #[test]
     fn editor_saved_material_metadata_survives_reopening_and_produces_candidates() {
