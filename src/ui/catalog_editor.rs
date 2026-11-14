@@ -421,7 +421,7 @@ impl CatalogEditor {
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
-                ("FFmpeg（音声変換・書き出し）", &mut self.ffmpeg_path),
+                ("音声変換・書き出し", &mut self.ffmpeg_path),
                 ("音声認識", &mut self.whisper_path),
                 ("音声認識モデル", &mut self.model_path),
             ] {
@@ -449,7 +449,7 @@ impl CatalogEditor {
                 theme::state_message(
                     ui,
                     theme::State::Attention,
-                    "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルとモデルの設定」の「FFmpeg（音声変換・書き出し）」で実行ファイルを選択してください。",
+                    "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルとモデルの設定」の「音声変換・書き出し」で実行ファイルを選択してください。",
                 );
             }
             if !executable_exists(&self.whisper_path) || !PathBuf::from(&self.model_path).is_file()
@@ -975,7 +975,7 @@ fn default_whisper_path(relative: &str) -> String {
         .unwrap_or_default()
 }
 
-fn executable_exists(value: &str) -> bool {
+pub(super) fn executable_exists(value: &str) -> bool {
     let path = std::path::Path::new(value);
     if value.is_empty() {
         return false;

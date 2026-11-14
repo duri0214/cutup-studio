@@ -935,18 +935,35 @@ impl StudioApp {
             ));
             if let Some(editor) = &mut self.editor {
                 ui.horizontal(|ui| {
-                    ui.label("FFmpeg");
-                    ui.text_edit_singleline(&mut editor.ffmpeg_path);
+                    theme::form_label(ui, "音声エンコード");
+                    egui::ComboBox::from_id_salt("export_encoder")
+                        .selected_text("FFmpeg")
+                        .show_ui(ui, |ui| {
+                            let _ = ui.selectable_label(true, "FFmpeg");
+                        });
+                });
+                ui.horizontal_wrapped(|ui| {
+                    let source = if editor.ffmpeg_path == "ffmpeg" {
+                        "自動検出".to_owned()
+                    } else {
+                        editor.ffmpeg_path.clone()
+                    };
+                    ui.label(theme::detail_muted(format!("実行ファイル: {source}")));
                     if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
                         editor.ffmpeg_path = path.to_string_lossy().into_owned();
                     }
+                    if editor.ffmpeg_path != "ffmpeg"
+                        && theme::button(ui, "自動検出に戻す", theme::ButtonKind::Normal).clicked()
+                    {
+                        editor.ffmpeg_path = "ffmpeg".into();
+                    }
                 });
+                if !super::catalog_editor::executable_exists(&editor.ffmpeg_path) {
+                    theme::state_message(ui, theme::State::Attention, "FFmpeg が見つかりません。README の導入手順を確認するか、「実行ファイルを選択」で指定してください。");
+                }
             }
-            ui.label(theme::detail_muted(
-                "FFmpegの導入手順はREADMEを参照してください。",
-            ));
             if let Some(error) = &self.export_error {
                 theme::state_message(ui, theme::State::Error, error);
             }
