@@ -40,7 +40,6 @@ pub struct StudioApp {
     active_slot: Option<usize>,
     dragged_guide_index: Option<usize>,
     status: String,
-    export_ffmpeg: String,
     export_task: Option<Receiver<Result<String, String>>>,
     export_error: Option<String>,
 }
@@ -59,7 +58,6 @@ impl StudioApp {
             selections: BTreeMap::new(),
             active_slot: None,
             dragged_guide_index: None,
-            export_ffmpeg: "ffmpeg".into(),
             export_task: None,
             export_error: None,
             status: "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。".into(),
@@ -819,9 +817,10 @@ impl StudioApp {
                 .as_ref()
                 .ok_or("カタログがありません".to_owned())?;
             crate::infra::export::inputs(catalog, &recipe)
+                .map(|inputs| (inputs, PathBuf::from(&editor.ffmpeg_path)))
         })();
-        let inputs = match result {
-            Ok(inputs) => inputs,
+        let (inputs, ffmpeg) = match result {
+            Ok(value) => value,
             Err(error) => {
                 self.export_error = Some(error.clone());
                 self.status = format!("EXPORT ERROR — {error}");
@@ -836,7 +835,6 @@ impl StudioApp {
         else {
             return;
         };
-        let ffmpeg = PathBuf::from(&self.export_ffmpeg);
         let (sender, receiver) = mpsc::channel();
         let context = context.clone();
         std::thread::spawn(move || {
@@ -935,15 +933,17 @@ impl StudioApp {
             ui.label(theme::detail_muted(
                 "保存済みの構成を順番に連結し、ステレオ WAV として書き出します。",
             ));
-            ui.horizontal(|ui| {
-                ui.label("FFmpeg");
-                ui.text_edit_singleline(&mut self.export_ffmpeg);
-                if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
-                    && let Some(path) = rfd::FileDialog::new().pick_file()
-                {
-                    self.export_ffmpeg = path.to_string_lossy().into_owned();
-                }
-            });
+            if let Some(editor) = &mut self.editor {
+                ui.horizontal(|ui| {
+                    ui.label("FFmpeg");
+                    ui.text_edit_singleline(&mut editor.ffmpeg_path);
+                    if theme::button(ui, "実行ファイルを選択", theme::ButtonKind::Normal).clicked()
+                        && let Some(path) = rfd::FileDialog::new().pick_file()
+                    {
+                        editor.ffmpeg_path = path.to_string_lossy().into_owned();
+                    }
+                });
+            }
             ui.label(theme::detail_muted(
                 "FFmpegの導入手順はREADMEを参照してください。",
             ));

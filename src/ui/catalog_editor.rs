@@ -54,7 +54,7 @@ pub(super) struct CatalogEditor {
     active_tab: EditorTab,
     keep_open: bool,
     message: Option<(theme::State, String)>,
-    ffmpeg_path: String,
+    pub(super) ffmpeg_path: String,
     whisper_path: String,
     model_path: String,
     ollama_model: String,
@@ -62,7 +62,6 @@ pub(super) struct CatalogEditor {
     ollama_models_task: Option<Receiver<Result<OllamaTaskResult, ollama::OllamaError>>>,
     ollama_available: Option<bool>,
     ollama_start_requested: bool,
-    audio_conversion: bool,
     speech_recognition: bool,
     speech_language: SpeechLanguage,
     force_reanalysis: bool,
@@ -104,7 +103,6 @@ impl CatalogEditor {
             ollama_models_task: Some(models_receiver),
             ollama_available: None,
             ollama_start_requested: false,
-            audio_conversion: false,
             speech_recognition: false,
             speech_language: SpeechLanguage::Auto,
             force_reanalysis: false,
@@ -231,6 +229,7 @@ impl CatalogEditor {
         ui.label(theme::body(
             "再解析が成功すると、以前の解析候補とその修正は置き換わります。",
         ));
+        ui.label(theme::detail_muted("文字起こしの前に FFmpeg で音声を変換し、Whisper で文字にします。Ollama は説明候補を作ります。"));
         let previous = self.material_id;
         ui.horizontal(|ui| {
             theme::form_label(ui, "素材");
@@ -254,19 +253,6 @@ impl CatalogEditor {
         if previous != self.material_id {
             self.load_selected();
         }
-        ui.horizontal(|ui| {
-            theme::form_label(ui, "音声変換");
-            egui::ComboBox::from_id_salt("audio_converter")
-                .selected_text(if self.audio_conversion {
-                    "FFmpeg"
-                } else {
-                    "なし"
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.audio_conversion, false, "なし");
-                    ui.selectable_value(&mut self.audio_conversion, true, "FFmpeg");
-                });
-        });
         ui.horizontal(|ui| {
             theme::form_label(ui, "音声認識");
             egui::ComboBox::from_id_salt("speech_recognizer")
@@ -433,7 +419,7 @@ impl CatalogEditor {
         });
         ui.collapsing("実行ファイルとモデルの設定", |ui| {
             for (label, value) in [
-                ("音声変換", &mut self.ffmpeg_path),
+                ("FFmpeg（音声変換・書き出し）", &mut self.ffmpeg_path),
                 ("音声認識", &mut self.whisper_path),
                 ("音声認識モデル", &mut self.model_path),
             ] {
@@ -456,8 +442,7 @@ impl CatalogEditor {
                 });
             }
         });
-        if self.audio_conversion
-            && self.speech_recognition
+        if self.speech_recognition
             && (!executable_exists(&self.ffmpeg_path)
                 || !executable_exists(&self.whisper_path)
                 || !PathBuf::from(&self.model_path).is_file())
@@ -484,7 +469,6 @@ impl CatalogEditor {
                     .add_enabled_ui(
                         self.analysis_task.is_none()
                             && self.material_id.is_some()
-                            && self.audio_conversion
                             && self.speech_recognition
                             && executable_exists(&self.ffmpeg_path)
                             && executable_exists(&self.whisper_path)
