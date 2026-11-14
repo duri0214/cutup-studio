@@ -195,12 +195,7 @@ impl CatalogEditor {
         }
         ui.horizontal(|ui| {
             Self::tab_button(ui, &mut self.active_tab, EditorTab::Search, "素材を探す");
-            Self::tab_button(
-                ui,
-                &mut self.active_tab,
-                EditorTab::Metadata,
-                "素材の情報を登録",
-            );
+            Self::tab_button(ui, &mut self.active_tab, EditorTab::Metadata, "手入力");
             Self::tab_button(ui, &mut self.active_tab, EditorTab::Analysis, "解析");
         });
         ui.add_space(theme::SPACE_SM);

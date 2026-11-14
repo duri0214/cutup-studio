@@ -525,7 +525,7 @@ impl StudioApp {
                     .is_some_and(|editor| editor.count() > 0 && !editor.open);
                 if ui
                     .add_enabled_ui(can_open_editor, |ui| {
-                        theme::button(ui, "素材情報を編集 →", theme::ButtonKind::Primary)
+                        theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
                     })
                     .inner
                     .clicked()
@@ -910,7 +910,7 @@ impl eframe::App for StudioApp {
             PanelEvent::None => {}
             PanelEvent::Closed => {
                 self.status =
-                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材情報を編集 →」で右ペインを開けます。"
+                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材の情報を登録」で右ペインを開けます。"
                         .into();
             }
             PanelEvent::Saved => {
