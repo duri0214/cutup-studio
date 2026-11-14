@@ -1024,6 +1024,30 @@ mod tests {
     use crate::domain::service::create_plan;
 
     #[test]
+    fn missing_ffmpeg_does_not_prevent_catalog_search() {
+        const CHILD: &str = "CUTUP_TEST_WITHOUT_FFMPEG";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(!executable_exists("ffmpeg"));
+            editor_saved_material_metadata_survives_reopening_and_produces_candidates();
+            return;
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("ui::catalog_editor::tests::missing_ffmpeg_does_not_prevent_catalog_search")
+            .env(CHILD, "1")
+            .env("PATH", directory.path())
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
+    #[test]
     fn summary_markdown_is_readable_without_raw_formatting() {
         let text =
             markdown_plain_text("**内容の候補:**\n\n* **確認:** こんにちは\n* **注意:** 不明です");
