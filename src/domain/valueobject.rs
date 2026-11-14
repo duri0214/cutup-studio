@@ -5,6 +5,7 @@ use thiserror::Error;
 
 pub mod catalog;
 
+/// Version of the serializable catalog value, separate from the SQLite schema version.
 pub const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Error)]

@@ -52,6 +52,7 @@ pub const BRAND_TEXT_SIZE: f32 = 25.0;
 pub const BUTTON_TEXT_SIZE: f32 = 12.0;
 pub const TAB_TEXT_SIZE: f32 = 12.0;
 pub const INPUT_HEIGHT: f32 = 30.0;
+pub const FORM_LABEL_WIDTH: f32 = 90.0;
 pub const SUGGESTION_LIST_HEIGHT: f32 = 220.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,8 @@ pub enum ActionIcon {
     New,
     Open,
     Delete,
+    Close,
+    Ollama,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,28 +118,30 @@ fn install_japanese_font(context: &Context) {
     let Some(windows_directory) = std::env::var_os("WINDIR") else {
         return;
     };
-    let path = std::path::Path::new(&windows_directory)
-        .join("Fonts")
-        .join("YuGothM.ttc");
-    let Ok(font_data) = std::fs::read(path) else {
-        return;
-    };
-
     let mut fonts = FontDefinitions::default();
-    let font_name = "yu-gothic".to_owned();
-    fonts.font_data.insert(
-        font_name.clone(),
-        Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
-            y_offset: 2.0,
-            ..Default::default()
-        })),
-    );
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .insert(0, font_name.clone());
+    for (name, file) in [
+        ("malgun-gothic", "malgun.ttf"),
+        ("yu-gothic", "YuGothM.ttc"),
+    ] {
+        let path = std::path::Path::new(&windows_directory)
+            .join("Fonts")
+            .join(file);
+        if let Ok(font_data) = std::fs::read(path) {
+            fonts.font_data.insert(
+                name.to_owned(),
+                Arc::new(FontData::from_owned(font_data).tweak(FontTweak {
+                    y_offset: 2.0,
+                    ..Default::default()
+                })),
+            );
+            for family in [FontFamily::Proportional, FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .insert(0, name.to_owned());
+            }
+        }
     }
     context.set_fonts(fonts);
 }
@@ -173,6 +178,13 @@ pub fn detail(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).size(DETAIL_TEXT_SIZE)
 }
 
+pub fn form_label(ui: &mut Ui, text: &str) {
+    ui.add_sized(
+        [FORM_LABEL_WIDTH, INPUT_HEIGHT],
+        egui::Label::new(detail(text)),
+    );
+}
+
 pub fn detail_muted(text: impl Into<String>) -> RichText {
     detail(text).color(MUTED)
 }
@@ -182,6 +194,10 @@ pub fn caption_text(text: impl Into<String>) -> RichText {
         .size(CAPTION_TEXT_SIZE)
         .strong()
         .color(MUTED)
+}
+
+pub fn section_title(text: impl Into<String>) -> RichText {
+    body(text).strong().color(TEXT)
 }
 
 pub fn item_title(text: impl Into<String>) -> RichText {
@@ -220,6 +236,10 @@ pub fn ready_badge(ui: &mut Ui, text: &str) {
     state_badge(ui, text, State::Ready);
 }
 
+pub fn local_label(ui: &mut Ui) {
+    ui.label(detail_muted("ローカル"));
+}
+
 pub fn state_badge(ui: &mut Ui, text: &str, state: State) {
     badge_with_color(ui, text, state_color(state));
 }
@@ -242,13 +262,8 @@ fn badge_with_color(ui: &mut Ui, text: &str, color: Color32) {
         });
 }
 
-pub fn selection_count_badge(ui: &mut Ui, selected: usize, total: usize) {
-    let text = format!("選択 {selected} / {total}");
-    if selected > 0 {
-        state_badge(ui, &text, State::Selected);
-    } else {
-        badge_with_color(ui, &text, MUTED);
-    }
+pub fn selection_count(ui: &mut Ui, selected: usize, total: usize) {
+    ui.label(detail_muted(format!("選択 {selected} / {total}")));
 }
 
 pub fn state_message(ui: &mut Ui, state: State, text: &str) {
@@ -474,7 +489,9 @@ pub fn icon_button(ui: &mut Ui, icon: ActionIcon, tooltip: &str, kind: ButtonKin
         StrokeKind::Inside,
     );
     paint_action_icon(ui, icon, rect.center(), Vec2::splat(16.0), icon_color);
-    response.on_hover_text(tooltip)
+    response
+        .on_hover_text(tooltip)
+        .on_disabled_hover_text(tooltip)
 }
 
 pub fn drag_handle(ui: &mut Ui) -> Response {
@@ -651,5 +668,26 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         ActionIcon::Delete => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/trash.svg"))
         }
+        ActionIcon::Close => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/x.svg"))
+        }
+        ActionIcon::Ollama => egui::Image::new(egui::include_image!(
+            "../../assets/icons/ollama/ollama-logo.svg"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ollama_logo_rasterizes_in_a_color_that_accepts_ui_tint() {
+        let logo = egui_extras::image::load_svg_bytes(
+            include_bytes!("../../assets/icons/ollama/ollama-logo.svg"),
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(logo.pixels.iter().any(|pixel| {
+            pixel.a() >= 200 && pixel.r() >= 200 && pixel.g() >= 200 && pixel.b() >= 200
+        }));
     }
 }

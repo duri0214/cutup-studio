@@ -1,5 +1,5 @@
 PRAGMA application_id = 1129665603;
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 CREATE TABLE catalog (id INTEGER PRIMARY KEY CHECK(id=1), material_root TEXT NOT NULL);
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,

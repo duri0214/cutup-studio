@@ -31,6 +31,39 @@ pub struct Material {
     pub fingerprint: String,
 }
 
+/// An analysis result remains separate from the user's metadata until reviewed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisCandidate {
+    pub text: String,
+    #[serde(default)]
+    pub original_text: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub model: String,
+    pub model_version: String,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalysisRecord {
+    pub fingerprint: String,
+    pub configuration: String,
+    pub status: AnalysisStatus,
+    pub candidates: Vec<AnalysisCandidate>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisStatus {
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoredMaterial {
     pub id: i64,

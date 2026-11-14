@@ -12,7 +12,6 @@ use crate::{
         service::create_plan,
         valueobject::{
             Candidate, Catalog, CompositionRecipe, CompositionRecipeSlot, Plan, RecipeSelection,
-            SCHEMA_VERSION,
         },
     },
     infra::sqlite_catalog::{CatalogError, SqliteCatalog},
@@ -456,7 +455,6 @@ impl StudioApp {
                 if self.is_demo_catalog() && signal != theme::State::Error {
                     theme::ready_badge(ui, "DEMO");
                 }
-                ui.label(theme::caption_text(format!("SCHEMA V{SCHEMA_VERSION}")).monospace());
             });
         });
         ui.label(theme::body_muted(
@@ -525,7 +523,7 @@ impl StudioApp {
                     .is_some_and(|editor| editor.count() > 0 && !editor.open);
                 if ui
                     .add_enabled_ui(can_open_editor, |ui| {
-                        theme::button(ui, "素材情報を編集 →", theme::ButtonKind::Primary)
+                        theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
                     })
                     .inner
                     .clicked()
@@ -819,19 +817,10 @@ impl StudioApp {
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(32.0);
-                theme::caption(ui, "03 / COMPOSITION");
+                ui.label(theme::section_title("03 / COMPOSITION"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let can_load = self.editor.is_some();
                     let can_save = self.plan.is_some() && self.editor.is_some();
-                    if ui
-                        .add_enabled_ui(can_load, |ui| {
-                            theme::button(ui, "読み込み", theme::ButtonKind::Normal)
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        load_requested = true;
-                    }
                     if ui
                         .add_enabled_ui(can_save, |ui| {
                             theme::button(ui, "保存", theme::ButtonKind::Primary)
@@ -841,7 +830,16 @@ impl StudioApp {
                     {
                         save_requested = true;
                     }
-                    theme::selection_count_badge(ui, selected_count, entries.len());
+                    if ui
+                        .add_enabled_ui(can_load, |ui| {
+                            theme::button(ui, "読み込み", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        load_requested = true;
+                    }
+                    theme::selection_count(ui, selected_count, entries.len());
                 });
             });
             ui.label(theme::detail_muted(
@@ -886,7 +884,16 @@ impl eframe::App for StudioApp {
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
-                ui.label(theme::status_text(&self.status));
+                if let Some((state, message)) = self
+                    .editor
+                    .as_ref()
+                    .filter(|editor| editor.open)
+                    .and_then(CatalogEditor::message)
+                {
+                    theme::state_message(ui, state, message);
+                } else {
+                    ui.label(theme::status_text(&self.status));
+                }
             });
         });
         egui::SidePanel::right("information-pane")
@@ -897,7 +904,13 @@ impl eframe::App for StudioApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if registering {
                         if let Some(editor) = &mut self.editor {
+                            let previous_message =
+                                editor.message().map(|(_, text)| text.to_owned());
                             panel_event = editor.show_panel(ui, !busy);
+                            if previous_message.as_deref() != editor.message().map(|(_, text)| text)
+                            {
+                                context.request_repaint();
+                            }
                         }
                     } else if self.plan.is_some() {
                         self.show_candidate_pane(ui);
@@ -910,7 +923,7 @@ impl eframe::App for StudioApp {
             PanelEvent::None => {}
             PanelEvent::Closed => {
                 self.status =
-                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材情報を編集 →」で右ペインを開けます。"
+                    "MATERIAL EDITOR CLOSED — 01 / MATERIAL CATALOG の「素材の情報を登録」で右ペインを開けます。"
                         .into();
             }
             PanelEvent::Saved => {
@@ -939,7 +952,7 @@ impl eframe::App for StudioApp {
 fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
-        theme::caption(ui, title);
+        ui.label(theme::section_title(title));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             theme::traffic_light(ui, signal).on_hover_text(detail);
         });
