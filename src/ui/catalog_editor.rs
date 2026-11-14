@@ -470,7 +470,6 @@ impl CatalogEditor {
                     })
                 {
                     self.message = Some((theme::State::Ready, "同じ素材と設定の解析結果を表示しています。再実行には「同じ素材と設定でも再解析する」を選んでください。".into()));
-                    self.show_message(ui);
                     return false;
                 }
                 let had_previous = previous.is_some();
@@ -805,7 +804,9 @@ impl CatalogEditor {
     }
 
     fn show_message(&self, ui: &mut Ui) {
-        if let Some((state, message)) = &self.message {
+        if let Some((state, message)) = &self.message
+            && *state != theme::State::Ready
+        {
             theme::state_message(ui, *state, message);
         }
     }
