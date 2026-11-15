@@ -304,6 +304,12 @@ pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
     response
 }
 
+pub fn availability_indicator(ui: &mut Ui, available: bool) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+    ui.painter()
+        .circle_filled(rect.center(), 5.0, if available { ACCENT } else { RED });
+}
+
 pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
     let text_color = if selected { ACCENT } else { TEXT };
     let fill = if selected {
