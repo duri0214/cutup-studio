@@ -17,3 +17,4 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 sha2 = "0.10"
 tempfile = "3"
 ureq = { version = "3.5.2", default-features = false, features = ["json"] }
+url = "2"

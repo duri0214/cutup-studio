@@ -3,6 +3,85 @@ use std::{
     process::{Command, Stdio},
 };
 
+fn youtube_url(url: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "YouTube の動画 URL を入力してください。")?;
+    if parsed.scheme() != "https"
+        || !matches!(
+            parsed.host_str(),
+            Some("youtube.com" | "www.youtube.com" | "m.youtube.com" | "youtu.be")
+        )
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+    {
+        return Err("https の YouTube 動画 URL を入力してください。".into());
+    }
+    let id = if parsed.host_str() == Some("youtu.be") {
+        parsed.path().strip_prefix('/').map(str::to_owned)
+    } else if parsed.path() == "/watch" {
+        parsed
+            .query_pairs()
+            .find(|(key, _)| key == "v")
+            .map(|(_, value)| value.into_owned())
+    } else {
+        parsed.path().strip_prefix("/shorts/").map(str::to_owned)
+    };
+    if !id.as_deref().is_some_and(|id| {
+        id.len() == 11
+            && id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    }) {
+        return Err("YouTube の動画ページの URL を入力してください。".into());
+    }
+    Ok(parsed)
+}
+
+pub fn download_youtube(url: &str) -> Result<tempfile::TempDir, String> {
+    let parsed = youtube_url(url)?;
+    let dir = tempfile::tempdir().map_err(|e| format!("一時フォルダを作成できません: {e}"))?;
+    let mut command = Command::new("yt-dlp");
+    command
+        .args([
+            "--ignore-config",
+            "--no-playlist",
+            "--no-progress",
+            "--no-part",
+            "--socket-timeout",
+            "15",
+            "--retries",
+            "2",
+            "--js-runtimes",
+            "node",
+            "--js-runtimes",
+            "deno",
+            "--format",
+            "bestaudio/best",
+            "--extract-audio",
+            "--audio-format",
+            "wav",
+            "-o",
+        ])
+        .arg(dir.path().join("input.%(ext)s"))
+        .arg("--")
+        .arg(parsed.as_str())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let status = command
+        .status()
+        .map_err(|e| format!("yt-dlp を起動できません。導入と PATH を確認してください: {e}"))?;
+    if !status.success() || !dir.path().join("input.wav").is_file() {
+        return Err("動画の音声を取得できません。URL、公開状態、yt-dlp、FFmpeg、JavaScript 実行環境を確認してください。".into());
+    }
+    Ok(dir)
+}
+
 pub fn cut(input: &Path, output: &Path, start: f64, end: f64) -> Result<(), String> {
     if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
         return Err("開始は0以上、終了は開始より後にしてください。".into());
@@ -58,6 +137,41 @@ pub fn cut(input: &Path, output: &Path, start: f64, end: f64) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accepts_only_youtube_video_urls() {
+        assert!(youtube_url("https://www.youtube.com/watch?v=BaW_jenozKc").is_ok());
+        assert!(youtube_url("https://youtu.be/BaW_jenozKc").is_ok());
+        assert!(youtube_url("https://www.youtube.com/shorts/BaW_jenozKc").is_ok());
+        assert!(youtube_url("https://youtube.com.evil.test/watch?v=BaW_jenozKc").is_err());
+        assert!(youtube_url("https://www.youtube.com/playlist?list=abc").is_err());
+        assert!(youtube_url("https://www.youtube.com/watch?v=x").is_err());
+    }
+
+    #[test]
+    #[ignore = "requires network, yt-dlp, FFmpeg, whisper-cli and a model"]
+    fn downloads_youtube_audio_to_temporary_directory() {
+        let url = std::env::var("CUTUP_TEST_YOUTUBE_URL").unwrap();
+        let dir = download_youtube(&url).unwrap();
+        let input = dir.path().join("input.wav");
+        assert!(input.metadata().unwrap().len() > 78);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let config = crate::infra::local_ai::local_stt::SttConfig {
+            ffmpeg: "ffmpeg".into(),
+            whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
+            model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
+            language: crate::infra::local_ai::local_stt::SpeechLanguage::Auto,
+        };
+        let hash = crate::infra::local_ai::local_stt::fingerprint(&input, &cancel).unwrap();
+        let segments =
+            crate::infra::local_ai::local_stt::transcribe(&config, &input, &hash, &cancel).unwrap();
+        assert!(!segments.is_empty());
+        let output = dir.path().join("clip.wav");
+        cut(&input, &output, 0.0, 1.0).unwrap();
+        assert!(output.is_file());
+        let path = dir.path().to_owned();
+        drop(dir);
+        assert!(!path.exists());
+    }
     #[test]
     fn invalid_range_and_source_destination_are_rejected() {
         let dir = tempfile::tempdir().unwrap();

@@ -15,15 +15,20 @@ use std::{
     },
 };
 
+type AnalysisTask =
+    Receiver<Result<(Vec<AnalysisCandidate>, Option<tempfile::TempDir>, PathBuf), String>>;
+
 #[derive(Default)]
 pub(super) struct Splitter {
     pub open: bool,
     input: Option<PathBuf>,
+    url: String,
+    downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
     selected: Option<usize>,
     start: f64,
     end: f64,
-    task: Option<Receiver<Result<Vec<AnalysisCandidate>, String>>>,
+    task: Option<AnalysisTask>,
     operation: Option<Receiver<Result<(), String>>>,
     error: Option<String>,
 }
@@ -35,8 +40,10 @@ impl Splitter {
     pub fn show(&mut self, ctx: &Context, settings: &EditorSettings) {
         if let Some(task) = &self.task {
             match task.try_recv() {
-                Ok(Ok(segments)) => {
+                Ok(Ok((segments, downloaded, input))) => {
                     self.segments = segments;
+                    self.input = Some(input);
+                    self.downloaded = downloaded;
                     self.selected = None;
                     self.task = None;
                 }
@@ -78,22 +85,39 @@ impl Splitter {
             .show(ctx, |ui| {
                 let busy = self.task.is_some() || self.operation.is_some();
                 ui.add_enabled_ui(!busy, |ui| {
-                    if theme::button(ui, "動画を選ぶ", theme::ButtonKind::Normal).clicked()
-                        && let Some(path) = rfd::FileDialog::new().pick_file()
-                    {
-                        self.input = Some(path);
+                    ui.label("YouTube の動画 URL");
+                    ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
+                    if ui.text_edit_singleline(&mut self.url).changed() {
+                        self.input = None;
+                        self.downloaded = None;
                         self.segments.clear();
                         self.selected = None;
                         self.error = None;
                     }
-                    if let Some(path) = &self.input {
+                    if theme::button(ui, "動画を選ぶ", theme::ButtonKind::Normal).clicked()
+                        && let Some(path) = rfd::FileDialog::new().pick_file()
+                    {
+                        self.input = Some(path);
+                        self.url.clear();
+                        self.downloaded = None;
+                        self.segments.clear();
+                        self.selected = None;
+                        self.error = None;
+                    }
+                    if let Some(path) = &self.input
+                        && self.url.is_empty()
+                    {
                         ui.label(path.display().to_string());
                     }
                     if ui
-                        .add_enabled(self.input.is_some(), egui::Button::new("台詞を解析"))
+                        .add_enabled(
+                            self.input.is_some() || !self.url.trim().is_empty(),
+                            egui::Button::new("台詞を解析"),
+                        )
                         .clicked()
                     {
-                        let input = self.input.clone().unwrap_or_default();
+                        let local_input = self.input.clone();
+                        let url = self.url.trim().to_owned();
                         let config = SttConfig {
                             ffmpeg: "ffmpeg".into(),
                             whisper: settings.whisper_path.clone().into(),
@@ -107,11 +131,24 @@ impl Splitter {
                         self.error = None;
                         std::thread::spawn(move || {
                             let cancel = AtomicBool::new(false);
-                            let result = local_stt::fingerprint(&input, &cancel)
-                                .and_then(|hash| {
+                            let result = (|| {
+                                let downloaded = if url.is_empty() {
+                                    None
+                                } else {
+                                    Some(splitter::download_youtube(&url)?)
+                                };
+                                let input = if let Some(dir) = &downloaded {
+                                    dir.path().join("input.wav")
+                                } else {
+                                    local_input.ok_or("動画を選んでください。")?
+                                };
+                                let hash = local_stt::fingerprint(&input, &cancel)
+                                    .map_err(|e| e.to_string())?;
+                                let segments =
                                     local_stt::transcribe(&config, &input, &hash, &cancel)
-                                })
-                                .map_err(|e| e.to_string());
+                                        .map_err(|e| e.to_string())?;
+                                Ok((segments, downloaded, input))
+                            })();
                             let _ = tx.send(result);
                         });
                     }
