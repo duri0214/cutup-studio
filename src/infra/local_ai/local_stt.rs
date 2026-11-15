@@ -1,7 +1,9 @@
 //! Local speech-to-text using FFmpeg and whisper.cpp.
 use crate::domain::valueobject::catalog::AnalysisCandidate;
+use lindera::segmenter::Segmenter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::io::Read;
 use std::{
     fs,
@@ -24,6 +26,8 @@ pub enum SttError {
     Io(#[from] std::io::Error),
     #[error("音声認識結果の区間が不正です")]
     InvalidSegment,
+    #[error("日本語の形態素解析に失敗しました: {0}")]
+    Morphology(String),
     #[error("解析を中断しました")]
     Interrupted,
     #[error("素材が変更されました。基準フォルダを開き直してから再解析してください")]
@@ -64,6 +68,23 @@ struct TranscriptResult {
 }
 #[derive(Deserialize)]
 struct Segment {
+    text: String,
+    offsets: Offsets,
+}
+#[derive(Deserialize)]
+struct WordTranscript {
+    transcription: Vec<WordSegment>,
+    result: Option<TranscriptResult>,
+}
+#[derive(Deserialize)]
+struct WordSegment {
+    text: String,
+    offsets: Offsets,
+    #[serde(default)]
+    tokens: Option<Vec<WhisperToken>>,
+}
+#[derive(Deserialize)]
+struct WhisperToken {
     text: String,
     offsets: Offsets,
 }
@@ -136,7 +157,13 @@ fn transcribe_with_granularity(
     whisper
         .args(["-m"])
         .arg(&config.model)
-        .args(["-l", config.language.code(), "-oj", "-of"])
+        .args(["-l", config.language.code()])
+        .arg(if short_segments && dtw_model(&config.model).is_some() {
+            "-ojf"
+        } else {
+            "-oj"
+        })
+        .arg("-of")
         .arg(&output)
         .arg("-f")
         .arg(&audio)
@@ -144,22 +171,57 @@ fn transcribe_with_granularity(
         .stderr(Stdio::null());
     if short_segments {
         whisper.args(["-ml", "15"]);
+        if let Some(model) = dtw_model(&config.model) {
+            whisper.args(["-dtw", model]);
+        }
     }
     run(&mut whisper, "whisper-cli", cancel)?;
     if fingerprint(input, cancel)? != expected_fingerprint {
         return Err(SttError::MaterialChanged);
     }
-    let result = parse_transcript(
-        &fs::read(output.with_extension("json"))?,
-        model_name,
-        &version,
-    );
+    let json = fs::read(output.with_extension("json"))?;
+    let result = if short_segments && dtw_model(&config.model).is_some() {
+        parse_word_transcript(&json, model_name, &version)
+    } else {
+        parse_transcript(&json, model_name, &version)
+    };
     match result {
         Err(SttError::Json(_)) if short_segments => {
             transcribe_with_granularity(config, input, expected_fingerprint, cancel, false)
         }
         other => other,
     }
+}
+
+fn dtw_model(model_path: &Path) -> Option<&'static str> {
+    let stem = model_path
+        .file_stem()?
+        .to_str()?
+        .to_ascii_lowercase()
+        .strip_prefix("ggml-")?
+        .to_owned();
+    [
+        "large-v3-turbo",
+        "large-v3",
+        "large-v2",
+        "large-v1",
+        "medium.en",
+        "medium",
+        "small.en",
+        "small",
+        "base.en",
+        "base",
+        "tiny.en",
+        "tiny",
+        "turbo",
+    ]
+    .into_iter()
+    .find(|preset| {
+        stem == *preset
+            || stem.strip_prefix(*preset).is_some_and(|suffix| {
+                suffix.starts_with('-') || suffix.starts_with('.') || suffix.starts_with('_')
+            })
+    })
 }
 
 pub fn fingerprint(path: &Path, cancel: &AtomicBool) -> Result<String, SttError> {
@@ -233,6 +295,255 @@ fn parse_transcript(
             })
         })
         .collect()
+}
+
+fn parse_word_transcript(
+    json: &[u8],
+    model: &str,
+    version: &str,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
+    let json = String::from_utf8_lossy(json);
+    let transcript: WordTranscript = serde_json::from_str(&json)?;
+    let language = transcript.result.and_then(|result| result.language);
+    let config = serde_json::json!({
+        "dictionary": "embedded://ipadic",
+        "mode": "normal",
+    });
+    let mut segmenter = Segmenter::from_config(&config)
+        .map_err(|error| SttError::Morphology(error.to_string()))?
+        .into_worker();
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    for segment in transcript.transcription {
+        if segment.offsets.from > segment.offsets.to {
+            return Err(SttError::InvalidSegment);
+        }
+        if segment.text.trim().is_empty() {
+            continue;
+        }
+        let morphemes = segmenter
+            .segment(&segment.text)
+            .map_err(|error| SttError::Morphology(error.to_string()))?;
+        let Some(character_times) = segment
+            .tokens
+            .as_deref()
+            .and_then(|tokens| align_character_times(&segment.text, tokens))
+        else {
+            push_candidate_once(
+                segment_candidate(
+                    &segment.text,
+                    segment.offsets.from,
+                    segment.offsets.to,
+                    language.as_deref(),
+                    model,
+                    version,
+                ),
+                &mut seen,
+                &mut candidates,
+            );
+            continue;
+        };
+
+        let mut segment_words = Vec::new();
+        let mut needs_fallback = false;
+        let mut has_word = false;
+        for mut morpheme in morphemes {
+            if morpheme.details_iter().next() == Some("記号") {
+                continue;
+            }
+            let surface = morpheme.surface.as_ref().trim();
+            if surface.is_empty() {
+                continue;
+            }
+            has_word = true;
+            let start_byte = morpheme.byte_start;
+            let end_byte = morpheme.byte_end;
+            let character_range = segment
+                .text
+                .char_indices()
+                .enumerate()
+                .filter_map(|(index, (byte, _))| {
+                    (byte >= start_byte && byte < end_byte).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            let word_times = character_range
+                .iter()
+                .map(|&index| character_times.get(index).copied().flatten())
+                .collect::<Option<Vec<_>>>();
+            let Some(word_times) = word_times.filter(|times| !times.is_empty()) else {
+                needs_fallback = true;
+                break;
+            };
+            let start_ms = word_times
+                .iter()
+                .map(|(start, _)| *start)
+                .min()
+                .unwrap_or(segment.offsets.from)
+                .max(segment.offsets.from);
+            let end_ms = word_times
+                .iter()
+                .map(|(_, end)| *end)
+                .max()
+                .unwrap_or(segment.offsets.to)
+                .min(segment.offsets.to);
+            if end_ms <= start_ms {
+                needs_fallback = true;
+                break;
+            }
+            segment_words.push(AnalysisCandidate {
+                text: surface.to_owned(),
+                original_text: Some(segment.text.clone()),
+                language: language.clone(),
+                start_ms,
+                end_ms,
+                model: model.into(),
+                model_version: version.into(),
+                confidence: None,
+                evidence: Some("Whisperの時刻と形態素解析による単語候補".into()),
+            });
+        }
+
+        if needs_fallback {
+            push_candidate_once(
+                segment_candidate(
+                    &segment.text,
+                    segment.offsets.from,
+                    segment.offsets.to,
+                    language.as_deref(),
+                    model,
+                    version,
+                ),
+                &mut seen,
+                &mut candidates,
+            );
+            continue;
+        }
+        if !has_word {
+            continue;
+        }
+        for candidate in segment_words {
+            push_candidate_once(candidate, &mut seen, &mut candidates);
+        }
+    }
+    Ok(candidates)
+}
+
+fn segment_candidate(
+    text: &str,
+    start_ms: u64,
+    end_ms: u64,
+    language: Option<&str>,
+    model: &str,
+    version: &str,
+) -> AnalysisCandidate {
+    AnalysisCandidate {
+        text: text.to_owned(),
+        original_text: Some(text.to_owned()),
+        language: language.map(str::to_owned),
+        start_ms,
+        end_ms,
+        model: model.into(),
+        model_version: version.into(),
+        confidence: None,
+        evidence: Some("文字起こし区間（単語時刻を対応付けられませんでした）".into()),
+    }
+}
+
+fn push_candidate_once(
+    candidate: AnalysisCandidate,
+    seen: &mut HashSet<String>,
+    candidates: &mut Vec<AnalysisCandidate>,
+) {
+    if candidate.start_ms >= candidate.end_ms || seen.insert(candidate.text.clone()) {
+        candidates.push(candidate);
+    }
+}
+
+fn align_character_times(text: &str, tokens: &[WhisperToken]) -> Option<Vec<Option<(u64, u64)>>> {
+    let source = text
+        .char_indices()
+        .enumerate()
+        .filter(|(_, (_, character))| !character.is_whitespace())
+        .map(|(index, (_, character))| (index, character))
+        .collect::<Vec<_>>();
+    let timed = tokens
+        .iter()
+        .filter(|token| !(token.text.starts_with("[_") && token.text.ends_with(']')))
+        .flat_map(|token| {
+            token
+                .text
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .map(move |character| {
+                    let interval = (token.offsets.to > token.offsets.from)
+                        .then_some((token.offsets.from, token.offsets.to));
+                    (character, interval)
+                })
+        })
+        .collect::<Vec<_>>();
+    if source.is_empty() || timed.is_empty() {
+        return None;
+    }
+
+    const UNMATCHED_COST: u32 = 1;
+    const MISMATCH_COST: u32 = 3;
+    let mut costs = vec![vec![0_u32; timed.len() + 1]; source.len() + 1];
+    let mut paths = vec![vec![0_u8; timed.len() + 1]; source.len() + 1];
+    for (index, row) in costs.iter_mut().enumerate().skip(1) {
+        row[0] = index as u32 * UNMATCHED_COST;
+        paths[index][0] = 1;
+    }
+    for index in 1..=timed.len() {
+        costs[0][index] = index as u32 * UNMATCHED_COST;
+        paths[0][index] = 2;
+    }
+    for source_index in 1..=source.len() {
+        for timed_index in 1..=timed.len() {
+            let source_character = source[source_index - 1].1;
+            let timed_character = timed[timed_index - 1].0;
+            let match_cost = if source_character == timed_character || timed_character == '\u{fffd}'
+            {
+                0
+            } else {
+                MISMATCH_COST
+            };
+            let options = [
+                (costs[source_index - 1][timed_index - 1] + match_cost, 0_u8),
+                (costs[source_index - 1][timed_index] + UNMATCHED_COST, 1_u8),
+                (costs[source_index][timed_index - 1] + UNMATCHED_COST, 2_u8),
+            ];
+            let (cost, path) = options
+                .into_iter()
+                .min_by_key(|(cost, path)| (*cost, *path))
+                .unwrap_or_default();
+            costs[source_index][timed_index] = cost;
+            paths[source_index][timed_index] = path;
+        }
+    }
+
+    let mut result = vec![None; text.chars().count()];
+    let mut source_index = source.len();
+    let mut timed_index = timed.len();
+    while source_index > 0 || timed_index > 0 {
+        match paths[source_index][timed_index] {
+            0 if source_index > 0 && timed_index > 0 => {
+                let (original_index, source_character) = source[source_index - 1];
+                let (timed_character, interval) = timed[timed_index - 1];
+                if (source_character == timed_character || timed_character == '\u{fffd}')
+                    && interval.is_some()
+                {
+                    result[original_index] = interval;
+                }
+                source_index -= 1;
+                timed_index -= 1;
+            }
+            1 if source_index > 0 => source_index -= 1,
+            2 if timed_index > 0 => timed_index -= 1,
+            _ => return None,
+        }
+    }
+    Some(result)
 }
 
 #[cfg(test)]
@@ -403,5 +714,138 @@ mod tests {
             ),
             Err(SttError::InvalidSegment)
         ));
+    }
+
+    #[test]
+    fn splitting_returns_japanese_morphemes_with_token_times() {
+        let candidates = parse_word_transcript(
+            r#"{"result":{"language":"ja"},"transcription":[{"text":"猫が走った。","offsets":{"from":0,"to":700},"tokens":[{"text":"猫","offsets":{"from":100,"to":200}},{"text":"が","offsets":{"from":200,"to":260}},{"text":"走","offsets":{"from":260,"to":400}},{"text":"っ","offsets":{"from":400,"to":450}},{"text":"た","offsets":{"from":450,"to":500}},{"text":"。","offsets":{"from":500,"to":550}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+
+        assert!(candidates.iter().any(|candidate| candidate.text == "猫"));
+        assert!(candidates.iter().any(|candidate| candidate.text == "が"));
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.text.contains("走"))
+        );
+        assert!(
+            candidates.iter().all(|candidate| {
+                candidate.start_ms < candidate.end_ms && candidate.text != "。"
+            })
+        );
+    }
+
+    #[test]
+    fn splitting_keeps_the_first_valid_occurrence_of_each_surface() {
+        let candidates = parse_word_transcript(
+            r#"{"transcription":[{"text":"猫が猫が","offsets":{"from":0,"to":600},"tokens":[{"text":"猫","offsets":{"from":10,"to":100}},{"text":"が","offsets":{"from":100,"to":160}},{"text":"猫","offsets":{"from":300,"to":400}},{"text":"が","offsets":{"from":400,"to":460}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.text.as_str())
+                .collect::<Vec<_>>(),
+            ["猫", "が"]
+        );
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 100));
+        assert_eq!((candidates[1].start_ms, candidates[1].end_ms), (100, 160));
+    }
+
+    #[test]
+    fn splitting_falls_back_to_the_segment_when_token_text_cannot_be_aligned() {
+        let candidates = parse_word_transcript(
+            r#"{"transcription":[{"text":"猫が","offsets":{"from":10,"to":300},"tokens":[{"text":"犬犬","offsets":{"from":10,"to":200}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].text, "猫が");
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 300));
+    }
+
+    #[test]
+    fn splitting_deduplicates_a_fallback_surface_against_later_word_candidates() {
+        let candidates = parse_word_transcript(
+            r#"{"transcription":[{"text":"猫","offsets":{"from":10,"to":100}},{"text":"猫","offsets":{"from":200,"to":300},"tokens":[{"text":"猫","offsets":{"from":200,"to":280}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].text, "猫");
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 100));
+    }
+
+    #[test]
+    fn splitting_recovers_a_malformed_token_byte_without_losing_text() {
+        let mut json = r#"{"transcription":[{"text":"猫","offsets":{"from":0,"to":100},"tokens":[{"text":"x","offsets":{"from":10,"to":80}}]}]}"#.as_bytes().to_vec();
+        let token_text = json
+            .windows(3)
+            .position(|window| window == b"\"x\"")
+            .unwrap()
+            + 1;
+        json[token_text] = 0xff;
+
+        let candidates = parse_word_transcript(&json, "ggml-tiny.bin", "sha256:test").unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].text, "猫");
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 80));
+    }
+
+    #[test]
+    fn dtw_preset_is_derived_from_supported_model_filenames() {
+        assert_eq!(dtw_model(Path::new("ggml-tiny.bin")), Some("tiny"));
+        assert_eq!(
+            dtw_model(Path::new("ggml-large-v3-turbo-q5_0.bin")),
+            Some("large-v3-turbo")
+        );
+        assert_eq!(dtw_model(Path::new("custom-model.gguf")), None);
+    }
+
+    #[test]
+    #[ignore = "requires CUTUP_TEST_DTW_JSON from a whisper.cpp -ojf -dtw run"]
+    fn measures_issue_35_word_candidate_counts() {
+        let json =
+            fs::read(std::env::var_os("CUTUP_TEST_DTW_JSON").expect("set CUTUP_TEST_DTW_JSON"))
+                .unwrap();
+        let transcript: WordTranscript =
+            serde_json::from_str(&String::from_utf8_lossy(&json)).unwrap();
+        let segment_count = transcript.transcription.len();
+        let config = serde_json::json!({ "dictionary": "embedded://ipadic", "mode": "normal" });
+        let mut segmenter = Segmenter::from_config(&config).unwrap().into_worker();
+        let mut morpheme_occurrences = 0;
+        for segment in &transcript.transcription {
+            for mut morpheme in segmenter.segment(&segment.text).unwrap() {
+                if morpheme.details_iter().next() != Some("記号")
+                    && !morpheme.surface.trim().is_empty()
+                {
+                    morpheme_occurrences += 1;
+                }
+            }
+        }
+        let candidates =
+            parse_word_transcript(&json, "ggml-tiny.bin", "sha256:evaluation").unwrap();
+        let unique_words = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.evidence.as_deref() == Some("Whisperの時刻と形態素解析による単語候補")
+            })
+            .count();
+        let segment_fallbacks = candidates.len() - unique_words;
+        eprintln!(
+            "segments={segment_count} morpheme_occurrences={morpheme_occurrences} unique_word_candidates={unique_words} segment_fallbacks={segment_fallbacks}"
+        );
     }
 }

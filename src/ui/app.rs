@@ -1705,6 +1705,53 @@ mod tests {
     }
 
     #[test]
+    fn related_terms_show_a_material_once_and_keep_its_first_match() {
+        use crate::domain::valueobject::CatalogMaterial;
+        let catalog = Catalog {
+            schema_version: 1,
+            material_root: String::new(),
+            materials: vec![
+                CatalogMaterial {
+                    id: "pear".into(),
+                    source_path: "pear.wav".into(),
+                    keywords: vec!["梨".into(), "和梨".into()],
+                    tags: vec![],
+                    roles: vec!["導入".into()],
+                    note: String::new(),
+                },
+                CatalogMaterial {
+                    id: "pear-visual".into(),
+                    source_path: "pear-visual.wav".into(),
+                    keywords: vec!["和梨".into()],
+                    tags: vec![],
+                    roles: vec!["導入".into()],
+                    note: String::new(),
+                },
+            ],
+        };
+        let mut plan = create_plan(&catalog, "導入: りんご");
+        assert!(plan.slots[0].candidates.is_empty());
+
+        add_related_candidates(&catalog, &mut plan.slots[0], &["梨".into(), "和梨".into()]);
+
+        assert_eq!(plan.slots[0].candidates.len(), 2);
+        assert_eq!(plan.slots[0].candidates[0].material_id, "pear");
+        assert_eq!(plan.slots[0].candidates[1].material_id, "pear-visual");
+        assert!(
+            plan.slots[0].candidates[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("関連語「梨」"))
+        );
+        assert!(
+            !plan.slots[0].candidates[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("関連語「和梨」"))
+        );
+    }
+
+    #[test]
     #[ignore = "requires local Ollama and gemma4:e2b"]
     fn measure_related_search_over_5000_materials() {
         use crate::domain::valueobject::CatalogMaterial;

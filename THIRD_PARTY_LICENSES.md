@@ -6205,3 +6205,224 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+## Rust crates added for Japanese word candidates
+
+The following Windows build dependencies are used for word-level transcription. License expressions are from their published Cargo package metadata; the existing sections above include the MIT, Apache, BSD, ISC, Boost Software, and zlib terms. The `webpki-roots` data license and bundled IPADIC notice are reproduced below.
+
+| Crate | Version | License |
+| --- | --- | --- |
+| [anyhow](https://crates.io/crates/anyhow/1.0.104) | 1.0.104 | MIT OR Apache-2.0 |
+| [bytecheck](https://crates.io/crates/bytecheck/0.8.3) | 0.8.3 | MIT |
+| [bytecheck_derive](https://crates.io/crates/bytecheck_derive/0.8.3) | 0.8.3 | MIT |
+| [byteorder](https://crates.io/crates/byteorder/1.5.0) | 1.5.0 | Unlicense OR MIT |
+| [core_detect](https://crates.io/crates/core_detect/1.0.0) | 1.0.0 | MIT OR Apache-2.0 |
+| [crawdad](https://crates.io/crates/crawdad/0.4.1) | 0.4.1 | MIT OR Apache-2.0 |
+| [crossbeam-deque](https://crates.io/crates/crossbeam-deque/0.8.8) | 0.8.8 | MIT OR Apache-2.0 |
+| [crossbeam-epoch](https://crates.io/crates/crossbeam-epoch/0.9.21) | 0.9.21 | MIT OR Apache-2.0 |
+| [csv](https://crates.io/crates/csv/1.4.0) | 1.4.0 | Unlicense OR MIT |
+| [csv-core](https://crates.io/crates/csv-core/0.1.13) | 0.1.13 | Unlicense OR MIT |
+| [daachorse](https://crates.io/crates/daachorse/5.1.0) | 5.1.0 | MIT OR Apache-2.0 |
+| [either](https://crates.io/crates/either/1.19.0) | 1.19.0 | MIT OR Apache-2.0 |
+| [encoding_rs](https://crates.io/crates/encoding_rs/0.8.44) | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
+| [encoding_rs_io](https://crates.io/crates/encoding_rs_io/0.1.8) | 0.1.8 | MIT OR Apache-2.0 |
+| [filetime](https://crates.io/crates/filetime/0.2.29) | 0.2.29 | MIT OR Apache-2.0 |
+| [glob](https://crates.io/crates/glob/0.3.4) | 0.3.4 | MIT OR Apache-2.0 |
+| [lindera](https://crates.io/crates/lindera/6.2.0) | 6.2.0 | MIT |
+| [lindera-dictionary](https://crates.io/crates/lindera-dictionary/6.2.0) | 6.2.0 | MIT |
+| [lindera-ipadic](https://crates.io/crates/lindera-ipadic/6.2.0) | 6.2.0 | MIT |
+| [md5](https://crates.io/crates/md5/0.8.1) | 0.8.1 | Apache-2.0 OR MIT |
+| [multiversion_no_op](https://crates.io/crates/multiversion_no_op/1.0.0) | 1.0.0 | Apache-2.0 OR MIT |
+| [munge](https://crates.io/crates/munge/0.4.7) | 0.4.7 | MIT |
+| [munge_macro](https://crates.io/crates/munge_macro/0.4.7) | 0.4.7 | MIT |
+| [ptr_meta](https://crates.io/crates/ptr_meta/0.3.2) | 0.3.2 | MIT |
+| [ptr_meta_derive](https://crates.io/crates/ptr_meta_derive/0.3.2) | 0.3.2 | MIT |
+| [rancor](https://crates.io/crates/rancor/0.1.3) | 0.1.3 | MIT |
+| [rayon](https://crates.io/crates/rayon/1.12.0) | 1.12.0 | MIT OR Apache-2.0 |
+| [rayon-core](https://crates.io/crates/rayon-core/1.13.0) | 1.13.0 | MIT OR Apache-2.0 |
+| [rend](https://crates.io/crates/rend/0.5.4) | 0.5.4 | MIT |
+| [ring](https://crates.io/crates/ring/0.17.14) | 0.17.14 | Apache-2.0 AND ISC |
+| [rkyv](https://crates.io/crates/rkyv/0.8.18) | 0.8.18 | MIT |
+| [rkyv_derive](https://crates.io/crates/rkyv_derive/0.8.18) | 0.8.18 | MIT |
+| [rustls](https://crates.io/crates/rustls/0.23.46) | 0.23.46 | Apache-2.0 OR ISC OR MIT |
+| [rustls-pki-types](https://crates.io/crates/rustls-pki-types/1.16.0) | 1.16.0 | MIT OR Apache-2.0 |
+| [rustls-webpki](https://crates.io/crates/rustls-webpki/0.103.17) | 0.103.17 | ISC |
+| [ryu](https://crates.io/crates/ryu/1.0.23) | 1.0.23 | Apache-2.0 OR BSL-1.0 |
+| [subtle](https://crates.io/crates/subtle/2.6.1) | 2.6.1 | BSD-3-Clause |
+| [tar](https://crates.io/crates/tar/0.4.46) | 0.4.46 | MIT OR Apache-2.0 |
+| [untrusted](https://crates.io/crates/untrusted/0.9.0) | 0.9.0 | ISC |
+| [webpki-roots](https://crates.io/crates/webpki-roots/1.0.12) | 1.0.12 | CDLA-Permissive-2.0 |
+| [zeroize](https://crates.io/crates/zeroize/1.9.1) | 1.9.1 | Apache-2.0 OR MIT |
+
+### MIT License for Lindera
+
+Copyright (c) 2019 by the project authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### IPADIC dictionary notice
+
+The bundled IPADIC data carries the following upstream notice:
+
+```text
+===========================================================================
+Lindera Morphological Analyzer
+===========================================================================
+
+This software includes a binary and/or source version of data from
+
+  mecab-ipadic-2.7.0-20070801
+
+which can be obtained from
+
+  http://jaist.dl.sourceforge.net/project/mecab/mecab-ipadic/2.7.0-20070801/mecab-ipadic-2.7.0-20070801.tar.gz
+
+===========================================================================
+mecab-ipadic-2.7.0-20070801 Notice
+===========================================================================
+
+Nara Institute of Science and Technology (NAIST),
+the copyright holders, disclaims all warranties with regard to this
+software, including all implied warranties of merchantability and
+fitness, in no event shall NAIST be liable for
+any special, indirect or consequential damages or any damages
+whatsoever resulting from loss of use, data or profits, whether in an
+action of contract, negligence or other tortuous action, arising out
+of or in connection with the use or performance of this software.
+
+A large portion of the dictionary entries
+originate from ICOT Free Software.  The following conditions for ICOT
+Free Software applies to the current dictionary as well.
+
+Each User may also freely distribute the Program, whether in its
+original form or modified, to any third party or parties, PROVIDED
+that the provisions of Section 3 ("NO WARRANTY") will ALWAYS appear
+on, or be attached to, the Program, which is distributed substantially
+in the same form as set out herein and that such intended
+distribution, if actually made, will neither violate or otherwise
+contravene any of the laws and regulations of the countries having
+jurisdiction over the User or the intended distribution itself.
+
+NO WARRANTY
+
+The program was produced on an experimental basis in the course of the
+research and development conducted during the project and is provided
+to users as so produced on an experimental basis.  Accordingly, the
+program is provided without any warranty whatsoever, whether express,
+implied, statutory or otherwise.  The term "warranty" used herein
+includes, but is not limited to, any warranty of the quality,
+performance, merchantability and fitness for a particular purpose of
+the program and the nonexistence of any infringement or violation of
+any right of any third party.
+
+Each user of the program will agree and understand, and be deemed to
+have agreed and understood, that there is no warranty whatsoever for
+the program and, accordingly, the entire risk arising from or
+otherwise connected with the program is assumed by the user.
+
+Therefore, neither ICOT, the copyright holder, or any other
+organization that participated in or was otherwise related to the
+development of the program and their respective officials, directors,
+officers and other employees shall be held liable for any and all
+damages, including, without limitation, general, special, incidental
+and consequential damages, arising out of or otherwise in connection
+with the use or inability to use the program or any product, material
+or result produced or otherwise obtained by using the program,
+regardless of whether they have been advised of, or otherwise had
+knowledge of, the possibility of such damages at any time during the
+project or thereafter.  Each user will be deemed to have agreed to the
+foregoing by his or her commencement of use of the program.  The term
+"use" as used herein includes, but is not limited to, the use,
+modification, copying and distribution of the program and the
+production of secondary products from the program.
+
+In the case where the program, whether in its original form or
+modified, was distributed or delivered to or received by a user from
+any person, organization or entity other than ICOT, unless it makes or
+grants independently of ICOT any specific warranty to the user in
+writing, such person, organization or entity, will also be exempted
+from and not be held liable to the user for any such damages as noted
+above as far as the program is concerned.
+```
+
+### CDLA-Permissive-2.0 for webpki-roots
+
+```text
+# Community Data License Agreement - Permissive - Version 2.0
+
+This is the Community Data License Agreement - Permissive, Version
+2.0 (the "agreement"). Data Provider(s) and Data Recipient(s) agree
+as follows:
+
+## 1. Provision of the Data
+
+1.1. A Data Recipient may use, modify, and share the Data made
+available by Data Provider(s) under this agreement if that Data
+Recipient follows the terms of this agreement.
+
+1.2. This agreement does not impose any restriction on a Data
+Recipient's use, modification, or sharing of any portions of the
+Data that are in the public domain or that may be used, modified,
+or shared under any other legal exception or limitation.
+
+## 2. Conditions for Sharing Data
+
+2.1. A Data Recipient may share Data, with or without modifications, so
+long as the Data Recipient makes available the text of this agreement
+with the shared Data.
+
+## 3. No Restrictions on Results
+
+3.1. This agreement does not impose any restriction or obligations
+with respect to the use, modification, or sharing of Results.
+
+## 4. No Warranty; Limitation of Liability
+
+4.1. All Data Recipients receive the Data subject to the following
+terms:
+
+THE DATA IS PROVIDED ON AN "AS IS" BASIS, WITHOUT REPRESENTATIONS,
+WARRANTIES OR CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED
+INCLUDING, WITHOUT LIMITATION, ANY WARRANTIES OR CONDITIONS OF TITLE,
+NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+NO DATA PROVIDER SHALL HAVE ANY LIABILITY FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING
+WITHOUT LIMITATION LOST PROFITS), HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE DATA OR RESULTS,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+## 5. Definitions
+
+5.1. "Data" means the material received by a Data Recipient under
+this agreement.
+
+5.2. "Data Provider" means any person who is the source of Data
+provided under this agreement and in reliance on a Data Recipient's
+agreement to its terms.
+
+5.3. "Data Recipient" means any person who receives Data directly
+or indirectly from a Data Provider and agrees to the terms of this
+agreement.
+
+5.4. "Results" means any outcome obtained by computational analysis
+of Data, including for example machine learning models and models'
+insights.
+```
