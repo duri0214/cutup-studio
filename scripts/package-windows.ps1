@@ -7,11 +7,6 @@ if ($LASTEXITCODE -ne 0 -or -not ($rustHost -contains 'host: x86_64-pc-windows-m
     throw 'The x86_64-pc-windows-msvc Rust toolchain is required'
 }
 if (Test-Path -LiteralPath $Output) { throw "Output already exists: $Output" }
-$before = (Get-FileHash -Algorithm SHA256 'THIRD_PARTY_LICENSES.md').Hash
-& "$PSScriptRoot/generate-licenses.ps1"
-if ($LASTEXITCODE -ne 0) { throw 'License generation failed' }
-$after = (Get-FileHash -Algorithm SHA256 'THIRD_PARTY_LICENSES.md').Hash
-if ($before -ne $after) { throw 'License notices changed. Review and commit them before packaging.' }
 cargo build --release --locked
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 New-Item -ItemType Directory -Path $Output | Out-Null

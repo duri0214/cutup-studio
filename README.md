@@ -98,11 +98,10 @@ FFmpeg は別途導入します。導入方法は [ローカル AI のセット�
 
 Windows x86-64 向けの依存ライブラリ、組み込みフォント、アイコンの情報は [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) にまとめています。FFmpeg とその他の外部ツールは利用者が別途用意します。
 
-配布用フォルダは、Rust の Windows x86-64 ツールチェーンを用意し、リポジトリのルートで次を実行して作成します。cargo-about は初回だけ導入します。出力先が既に存在する場合は停止します。
+配布用フォルダは、Rust の Windows x86-64 ツールチェーンを用意し、リポジトリのルートで次を実行して作成します。出力先が既に存在する場合は停止します。
 
 ```powershell
-cargo install cargo-about --version 0.8.4 --locked
 ./scripts/package-windows.ps1
 ```
 
-`dist/cutup-studio-windows/` に実行ファイル、DEMO、`LICENSE`、`THIRD_PARTY_LICENSES.md` とセットアップ案内をまとめます。ライセンスを表示するには、そのフォルダ内の `THIRD_PARTY_LICENSES.md` を開いてください。依存関係を更新した場合、`./scripts/generate-licenses.ps1` で一覧を再生成し、差分と追加された依存の著作権表示・NOTICE を確認してからコミットします。収集元にライセンス本文がないものは `licenses/upstream-notices.json` の該当バージョンと上流原本を確認します。著作権者が未記入の MIT 項目が新たに現れた場合は生成を停止します。生成時は依存クレートとライセンス情報の取得のため通信が必要です。
+`dist/cutup-studio-windows/` に実行ファイル、DEMO、`LICENSE`、`THIRD_PARTY_LICENSES.md` とセットアップ案内をまとめます。ライセンスを表示するには、そのフォルダ内の `THIRD_PARTY_LICENSES.md` を開いてください。依存ライブラリを更新するときは、追加・変更されたライセンスと著作権表示を確認し、一覧も更新してください。
