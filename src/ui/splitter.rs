@@ -5,7 +5,7 @@ use super::{
 use crate::{
     domain::valueobject::catalog::AnalysisCandidate,
     infra::{
-        local_ai::local_stt::{self, SttConfig},
+        local_ai::local_stt::{self, CandidateWidth, SttConfig},
         splitter,
     },
 };
@@ -140,7 +140,12 @@ impl Splitter {
             }
         }
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings, root: &std::path::Path) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        settings: &mut EditorSettings,
+        root: &std::path::Path,
+    ) {
         theme::panel().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     theme::pane_title(ui, "動画から素材を切り出す");
@@ -151,6 +156,7 @@ impl Splitter {
                     });
                 });
                 let busy = self.task.is_some() || self.operation.is_some();
+                let previous_candidate_width = settings.candidate_width;
                 ui.label("必要なツール（ファイルの有無）");
                 egui::Grid::new("splitter_tool_status").show(ui, |ui| {
                     for (name, present) in [
@@ -166,6 +172,29 @@ impl Splitter {
                 });
                 ui.label("Whisper とモデルは素材の「設定」で指定できます。PATH 変更後はアプリを再起動してください。");
                 ui.add_enabled_ui(!busy, |ui| {
+                    ui.horizontal(|ui| {
+                        theme::form_label(ui, "候補のまとまり");
+                        egui::ComboBox::from_id_salt("splitter_candidate_width")
+                            .selected_text(match settings.candidate_width {
+                                CandidateWidth::Standard => "標準",
+                                CandidateWidth::Wide => "広め",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut settings.candidate_width,
+                                    CandidateWidth::Standard,
+                                    "標準",
+                                );
+                                ui.selectable_value(
+                                    &mut settings.candidate_width,
+                                    CandidateWidth::Wide,
+                                    "広め",
+                                );
+                            });
+                        ui.label(theme::detail_muted(
+                            "広めは「驚くべきことに」のようにまとめます。切替後は再解析してください。",
+                        ));
+                    });
                     ui.label("動画の入力元");
                     ui.horizontal(|ui| {
                         if ui.radio(self.source == InputSource::Youtube, "YouTube URL").clicked() {
@@ -221,6 +250,7 @@ impl Splitter {
                             whisper: settings.whisper_path.clone().into(),
                             model: settings.model_path.clone().into(),
                             language: settings.speech_language,
+                            candidate_width: settings.candidate_width,
                         };
                         let (tx, rx) = mpsc::channel();
                         self.task = Some(rx);
@@ -302,6 +332,12 @@ impl Splitter {
                     }
 
                 });
+                if settings.candidate_width != previous_candidate_width {
+                    self.segments.clear();
+                    self.result_ready = false;
+                    self.selected = None;
+                    self.error = None;
+                }
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 }

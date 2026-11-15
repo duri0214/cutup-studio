@@ -1125,7 +1125,7 @@ impl eframe::App for StudioApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        let settings = self
+        let mut settings = self
             .editor
             .as_ref()
             .map(CatalogEditor::settings)
@@ -1330,9 +1330,13 @@ impl eframe::App for StudioApp {
                     {
                         self.splitter.show(
                             ui,
-                            &settings,
+                            &mut settings,
                             std::path::Path::new(&catalog.material_root),
                         );
+                        self.editor_settings.candidate_width = settings.candidate_width;
+                        if let Some(editor) = &mut self.editor {
+                            editor.set_candidate_width(settings.candidate_width);
+                        }
                     } else if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =

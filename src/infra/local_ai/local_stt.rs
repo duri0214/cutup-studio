@@ -39,6 +39,7 @@ pub struct SttConfig {
     pub whisper: PathBuf,
     pub model: PathBuf,
     pub language: SpeechLanguage,
+    pub candidate_width: CandidateWidth,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +56,13 @@ impl SpeechLanguage {
             Self::Japanese => "ja",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CandidateWidth {
+    Standard,
+    #[default]
+    Wide,
 }
 
 #[derive(Deserialize)]
@@ -181,7 +189,7 @@ fn transcribe_with_granularity(
     }
     let json = fs::read(output.with_extension("json"))?;
     let result = if short_segments && dtw_model(&config.model).is_some() {
-        parse_word_transcript(&json, model_name, &version)
+        parse_word_transcript_with_width(&json, model_name, &version, config.candidate_width)
     } else {
         parse_transcript(&json, model_name, &version)
     };
@@ -297,10 +305,20 @@ fn parse_transcript(
         .collect()
 }
 
+#[cfg(test)]
 fn parse_word_transcript(
     json: &[u8],
     model: &str,
     version: &str,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
+    parse_word_transcript_with_width(json, model, version, CandidateWidth::default())
+}
+
+fn parse_word_transcript_with_width(
+    json: &[u8],
+    model: &str,
+    version: &str,
+    candidate_width: CandidateWidth,
 ) -> Result<Vec<AnalysisCandidate>, SttError> {
     let json = String::from_utf8_lossy(json);
     let transcript: WordTranscript = serde_json::from_str(&json)?;
@@ -409,6 +427,7 @@ fn parse_word_transcript(
                 },
                 &mut phrase,
                 &mut segment_words,
+                candidate_width,
             );
         }
 
@@ -468,6 +487,7 @@ struct PhraseCandidate {
     end_ms: u64,
     byte_end: usize,
     last_part_of_speech: String,
+    last_surface: String,
     ends_with_particle: bool,
     incomplete_inflection: bool,
 }
@@ -476,6 +496,7 @@ fn push_morpheme(
     morpheme: TimedMorpheme,
     phrase: &mut Option<PhraseCandidate>,
     phrases: &mut Vec<PhraseCandidate>,
+    candidate_width: CandidateWidth,
 ) {
     if let Some(current) = phrase.as_ref()
         && current.byte_end != morpheme.byte_start
@@ -491,6 +512,7 @@ fn push_morpheme(
             current
                 .last_part_of_speech
                 .clone_from(&morpheme.part_of_speech);
+            current.last_surface.clone_from(&morpheme.surface);
             current.ends_with_particle = true;
         }
         return;
@@ -504,10 +526,22 @@ fn push_morpheme(
         return;
     }
 
+    let joins_nominalizer = candidate_width == CandidateWidth::Wide
+        && morpheme.part_of_speech == "名詞"
+        && morpheme.subcategory == "非自立"
+        && phrase.as_ref().is_some_and(|current| {
+            !current.incomplete_inflection
+                && (matches!(
+                    current.last_part_of_speech.as_str(),
+                    "動詞" | "助動詞" | "形容詞"
+                ) || (current.last_part_of_speech == "助詞"
+                    && matches!(current.last_surface.as_str(), "の" | "な")))
+        });
     let joins_compound = phrase.as_ref().is_some_and(|current| {
-        !current.ends_with_particle
-            && ((current.last_part_of_speech == "名詞" && morpheme.part_of_speech == "名詞")
-                || current.last_part_of_speech == "接頭詞")
+        joins_nominalizer
+            || (!current.ends_with_particle
+                && ((current.last_part_of_speech == "名詞" && morpheme.part_of_speech == "名詞")
+                    || current.last_part_of_speech == "接頭詞"))
     });
     if joins_compound {
         append_morpheme(phrase.as_mut().unwrap(), &morpheme);
@@ -519,6 +553,7 @@ fn push_morpheme(
             end_ms: morpheme.end_ms,
             byte_end: morpheme.byte_end,
             last_part_of_speech: morpheme.part_of_speech.clone(),
+            last_surface: morpheme.surface.clone(),
             ends_with_particle: false,
             incomplete_inflection: is_incomplete_inflection(&morpheme),
         });
@@ -533,6 +568,7 @@ fn append_morpheme(phrase: &mut PhraseCandidate, morpheme: &TimedMorpheme) {
     phrase
         .last_part_of_speech
         .clone_from(&morpheme.part_of_speech);
+    phrase.last_surface.clone_from(&morpheme.surface);
     phrase.ends_with_particle = false;
     phrase.incomplete_inflection = is_incomplete_inflection(morpheme);
 }
@@ -683,6 +719,7 @@ mod tests {
             whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
             model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
             language: SpeechLanguage::Auto,
+            candidate_width: CandidateWidth::default(),
         };
         let cancel = AtomicBool::new(false);
         let hash = fingerprint(&input, &cancel).unwrap();
@@ -708,6 +745,7 @@ mod tests {
             whisper: temp.path().join("whisper"),
             model,
             language: SpeechLanguage::Auto,
+            candidate_width: CandidateWidth::default(),
         };
         let digest = fingerprint(&media, &cancel).unwrap();
         assert!(matches!(
@@ -726,6 +764,7 @@ mod tests {
             whisper: temp.path().join("missing-whisper"),
             model: temp.path().join("missing-model"),
             language: SpeechLanguage::Auto,
+            candidate_width: CandidateWidth::default(),
         };
         assert!(matches!(
             transcribe(&config, &media, "old-fingerprint", &AtomicBool::new(false)),
@@ -740,6 +779,7 @@ mod tests {
             whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
             model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
             language: SpeechLanguage::Japanese,
+            candidate_width: CandidateWidth::default(),
         };
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/materials/01-tekkaman.wav");
         let cancel = AtomicBool::new(false);
@@ -766,6 +806,7 @@ mod tests {
                 .expect("set CUTUP_TEST_MODEL")
                 .into(),
             language: SpeechLanguage::Auto,
+            candidate_width: CandidateWidth::default(),
         };
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/materials/08-nani.wav");
         let cancel = AtomicBool::new(false);
@@ -898,6 +939,37 @@ mod tests {
         assert_eq!(phrases, ["青森の", "梨", "今年も", "来た"]);
         assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 220));
         assert_eq!((candidates[3].start_ms, candidates[3].end_ms), (470, 580));
+    }
+
+    #[test]
+    fn splitting_candidate_width_controls_nominalizer_grouping() {
+        let json = r#"{"transcription":[{"text":"驚くべきことに","offsets":{"from":0,"to":300},"tokens":[{"text":"驚く","offsets":{"from":10,"to":100}},{"text":"べき","offsets":{"from":100,"to":150}},{"text":"こと","offsets":{"from":150,"to":230}},{"text":"に","offsets":{"from":230,"to":270}}]}]}"#;
+
+        let standard = parse_word_transcript_with_width(
+            json.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+            CandidateWidth::Standard,
+        )
+        .unwrap();
+        let wide = parse_word_transcript_with_width(
+            json.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+            CandidateWidth::Wide,
+        )
+        .unwrap();
+
+        assert_eq!(
+            standard
+                .iter()
+                .map(|candidate| candidate.text.as_str())
+                .collect::<Vec<_>>(),
+            ["驚くべき", "ことに"]
+        );
+        assert_eq!(wide.len(), 1);
+        assert_eq!(wide[0].text, "驚くべきことに");
+        assert_eq!((wide[0].start_ms, wide[0].end_ms), (10, 270));
     }
 
     #[test]

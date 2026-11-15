@@ -298,6 +298,7 @@ mod tests {
             whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
             model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
             language: crate::infra::local_ai::local_stt::SpeechLanguage::Auto,
+            candidate_width: crate::infra::local_ai::local_stt::CandidateWidth::default(),
         };
         let hash = crate::infra::local_ai::local_stt::fingerprint(&input, &cancel).unwrap();
         let segments =

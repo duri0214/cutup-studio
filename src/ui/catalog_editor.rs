@@ -1,5 +1,5 @@
 use crate::infra::local_ai::{
-    local_stt::{self, SpeechLanguage, SttConfig},
+    local_stt::{self, CandidateWidth, SpeechLanguage, SttConfig},
     ollama,
 };
 use crate::{
@@ -42,6 +42,7 @@ pub(super) struct EditorSettings {
     ollama_model: String,
     speech_recognition: bool,
     pub(super) speech_language: SpeechLanguage,
+    pub(super) candidate_width: CandidateWidth,
 }
 
 impl Default for EditorSettings {
@@ -52,6 +53,7 @@ impl Default for EditorSettings {
             ollama_model: String::new(),
             speech_recognition: false,
             speech_language: SpeechLanguage::Auto,
+            candidate_width: CandidateWidth::default(),
         }
     }
 }
@@ -94,6 +96,7 @@ pub(super) struct CatalogEditor {
     ollama_start_requested: bool,
     speech_recognition: bool,
     speech_language: SpeechLanguage,
+    candidate_width: CandidateWidth,
     analysis_task: Option<AnalysisTask>,
     analysis_cancel: Option<Arc<AtomicBool>>,
     analysis_running_id: Option<i64>,
@@ -138,6 +141,7 @@ impl CatalogEditor {
             ollama_start_requested: false,
             speech_recognition: settings.speech_recognition,
             speech_language: settings.speech_language,
+            candidate_width: settings.candidate_width,
             analysis_task: None,
             analysis_cancel: None,
             analysis_running_id: None,
@@ -154,7 +158,12 @@ impl CatalogEditor {
             ollama_model: self.ollama_model.clone(),
             speech_recognition: self.speech_recognition,
             speech_language: self.speech_language,
+            candidate_width: self.candidate_width,
         }
+    }
+
+    pub(super) fn set_candidate_width(&mut self, candidate_width: CandidateWidth) {
+        self.candidate_width = candidate_width;
     }
 
     pub fn selected_ollama_model(&self) -> Option<&str> {
@@ -609,6 +618,7 @@ impl CatalogEditor {
                     whisper: PathBuf::from(&self.whisper_path),
                     model: PathBuf::from(&self.model_path),
                     language: self.speech_language,
+                    candidate_width: self.candidate_width,
                 };
                 let ollama_model = self.ollama_model.trim().to_owned();
                 let fingerprint = material.fingerprint.clone();
@@ -1301,12 +1311,23 @@ mod tests {
             ollama_model: "gemma4:e2b".into(),
             speech_recognition: true,
             speech_language: SpeechLanguage::Japanese,
+            candidate_width: CandidateWidth::Standard,
         };
 
         let encoded = serde_json::to_string(&settings).unwrap();
         let restored: EditorSettings = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(restored, settings);
+    }
+
+    #[test]
+    fn editor_settings_without_candidate_width_use_the_wide_default() {
+        let restored: EditorSettings = serde_json::from_str(
+            r#"{"whisper_path":"whisper.exe","model_path":"tiny.bin","ollama_model":"","speech_recognition":true,"speech_language":"Japanese"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(restored.candidate_width, CandidateWidth::Wide);
     }
 
     #[test]
