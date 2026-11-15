@@ -525,7 +525,14 @@ impl StudioApp {
             ui.label(theme::brand_primary("CUTUP"));
             ui.label(theme::brand_secondary("STUDIO"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("ウィンドウサイズを戻す").clicked() {
+                if theme::icon_button(
+                    ui,
+                    theme::ActionIcon::RestoreSize,
+                    "ウィンドウサイズを戻す",
+                    theme::ButtonKind::Normal,
+                )
+                .clicked()
+                {
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
                     ui.ctx()
