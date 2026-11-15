@@ -46,6 +46,7 @@ pub(super) struct Splitter {
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
     results_generation: u64,
+    result_ready: bool,
     duration: f64,
     selected: Option<usize>,
     start: f64,
@@ -67,10 +68,14 @@ impl Splitter {
             self.url.clear();
             self.downloaded = None;
             self.segments.clear();
+            self.result_ready = false;
             self.selected = None;
             self.error = None;
             self.saved = None;
         }
+    }
+    pub fn result_count(&self) -> Option<usize> {
+        (self.open && self.result_ready && !self.is_busy()).then_some(self.segments.len())
     }
     pub fn saved_path(&self) -> Option<&std::path::Path> {
         self.open.then_some(self.saved.as_deref()).flatten()
@@ -84,6 +89,7 @@ impl Splitter {
                 Ok(Ok((segments, downloaded, input, duration))) => {
                     self.segments = valid_segments(segments, duration);
                     self.results_generation = self.results_generation.wrapping_add(1);
+                    self.result_ready = true;
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -171,6 +177,7 @@ impl Splitter {
                                 self.input = None;
                                 self.downloaded = None;
                                 self.segments.clear();
+            self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -182,6 +189,7 @@ impl Splitter {
                             {
                                 self.input = Some(path);
                                 self.segments.clear();
+            self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -209,6 +217,7 @@ impl Splitter {
                         let (tx, rx) = mpsc::channel();
                         self.task = Some(rx);
                         self.segments.clear();
+            self.result_ready = false;
                         self.selected = None;
                         self.error = None;
                         std::thread::spawn(move || {

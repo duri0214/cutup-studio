@@ -1273,6 +1273,8 @@ impl eframe::App for StudioApp {
                     theme::state_message(ui, theme::State::Error, error);
                 } else if let Some(path) = self.splitter.saved_path().filter(|_| self.active_section == Section::Catalog) {
                     ui.label(theme::status_text(format!("保存先: {}。カタログに反映するには OPEN で基準フォルダを開き直してください。", path.display())));
+                } else if let Some(count) = self.splitter.result_count().filter(|_| self.active_section == Section::Catalog) {
+                    ui.label(theme::status_text(format!("文字起こし完了 — {count} 件")));
                 } else if let Some((state, message)) = self
                     .editor
                     .as_ref()
