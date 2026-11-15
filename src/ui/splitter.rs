@@ -45,7 +45,7 @@ pub(super) struct Splitter {
     url: String,
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
-    results_generation: u64,
+    reset_result_scroll: bool,
     result_ready: bool,
     duration: f64,
     selected: Option<usize>,
@@ -95,7 +95,7 @@ impl Splitter {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input, duration))) => {
                     self.segments = valid_segments(segments, duration);
-                    self.results_generation = self.results_generation.wrapping_add(1);
+                    self.reset_result_scroll = true;
                     self.result_ready = true;
                     self.duration = duration;
                     self.input = Some(input);
@@ -256,12 +256,16 @@ impl Splitter {
                         ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.label("文字起こし結果");
+                        let reset_scroll = std::mem::take(&mut self.reset_result_scroll);
+                        let heading = ui.label("文字起こし結果");
+                        if reset_scroll {
+                            heading.scroll_to_me(Some(egui::Align::Min));
+                        }
                         if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
                             self.save_all(root.to_owned());
                         }
                         let mut action = None;
-                        egui::ScrollArea::vertical().id_salt(("splitter_segments_scroll", self.results_generation)).max_height(180.0).show(ui, |ui| {
+                        results_scroll_area(reset_scroll).show(ui, |ui| {
                             let label_width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
@@ -392,6 +396,17 @@ fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<Analys
         result.push(segment);
     }
     result
+}
+
+fn results_scroll_area(reset: bool) -> egui::ScrollArea {
+    let area = egui::ScrollArea::vertical()
+        .id_salt("splitter_segments_scroll")
+        .max_height(180.0);
+    if reset {
+        area.vertical_scroll_offset(0.0)
+    } else {
+        area
+    }
 }
 
 fn segment_label(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) -> egui::Response {
@@ -545,6 +560,38 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "テッカマン");
         assert_eq!((segments[0].start_ms, segments[0].end_ms), (0, 900));
+    }
+
+    #[test]
+    fn new_results_reset_previously_scrolled_list() {
+        use eframe::egui::{self, RawInput};
+        fn frame(ctx: &egui::Context, reset: bool, forced: Option<f32>) -> f32 {
+            let mut offset = 0.0;
+            let _ = ctx.run(RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut area = super::results_scroll_area(reset);
+                    if let Some(value) = forced {
+                        area = area.vertical_scroll_offset(value);
+                    }
+                    offset = area
+                        .show(ui, |ui| {
+                            for index in 0..40 {
+                                ui.label(format!("row {index}"));
+                            }
+                        })
+                        .state
+                        .offset
+                        .y;
+                });
+            });
+            offset
+        }
+        let ctx = egui::Context::default();
+        frame(&ctx, false, None);
+        assert!(frame(&ctx, false, Some(150.0)) > 0.0);
+        assert_eq!(frame(&ctx, true, None), 0.0);
+        assert!(frame(&ctx, false, Some(100.0)) > 0.0);
+        assert!(frame(&ctx, false, None) > 0.0);
     }
 
     #[test]
