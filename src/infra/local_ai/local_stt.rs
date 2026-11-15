@@ -346,17 +346,22 @@ fn parse_word_transcript(
         };
 
         let mut segment_words = Vec::new();
+        let mut phrase = None;
         let mut needs_fallback = false;
-        let mut has_word = false;
         for mut morpheme in morphemes {
-            if morpheme.details_iter().next() == Some("記号") {
+            let details = morpheme
+                .details_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let part_of_speech = details.first().map(String::as_str).unwrap_or("");
+            if part_of_speech == "記号" {
+                finish_phrase(&mut phrase, &mut segment_words);
                 continue;
             }
             let surface = morpheme.surface.as_ref().trim();
             if surface.is_empty() {
                 continue;
             }
-            has_word = true;
             let start_byte = morpheme.byte_start;
             let end_byte = morpheme.byte_end;
             let character_range = segment
@@ -391,17 +396,20 @@ fn parse_word_transcript(
                 needs_fallback = true;
                 break;
             }
-            segment_words.push(AnalysisCandidate {
-                text: surface.to_owned(),
-                original_text: Some(segment.text.clone()),
-                language: language.clone(),
-                start_ms,
-                end_ms,
-                model: model.into(),
-                model_version: version.into(),
-                confidence: None,
-                evidence: Some("Whisperの時刻と形態素解析による単語候補".into()),
-            });
+            push_morpheme(
+                TimedMorpheme {
+                    surface: surface.to_owned(),
+                    part_of_speech: part_of_speech.to_owned(),
+                    subcategory: details.get(1).cloned().unwrap_or_default(),
+                    conjugation_form: details.get(5).cloned().unwrap_or_default(),
+                    byte_start: start_byte,
+                    byte_end: end_byte,
+                    start_ms,
+                    end_ms,
+                },
+                &mut phrase,
+                &mut segment_words,
+            );
         }
 
         if needs_fallback {
@@ -419,14 +427,130 @@ fn parse_word_transcript(
             );
             continue;
         }
-        if !has_word {
-            continue;
-        }
-        for candidate in segment_words {
-            push_candidate_once(candidate, &mut seen, &mut candidates);
+        finish_phrase(&mut phrase, &mut segment_words);
+        for phrase in segment_words {
+            push_candidate_once(
+                AnalysisCandidate {
+                    text: phrase.text,
+                    original_text: Some(segment.text.clone()),
+                    language: language.clone(),
+                    start_ms: phrase.start_ms,
+                    end_ms: phrase.end_ms,
+                    model: model.into(),
+                    model_version: version.into(),
+                    confidence: None,
+                    evidence: Some("Whisperの時刻と形態素解析でまとめた語句候補".into()),
+                },
+                &mut seen,
+                &mut candidates,
+            );
         }
     }
     Ok(candidates)
+}
+
+#[derive(Debug)]
+struct TimedMorpheme {
+    surface: String,
+    part_of_speech: String,
+    subcategory: String,
+    conjugation_form: String,
+    byte_start: usize,
+    byte_end: usize,
+    start_ms: u64,
+    end_ms: u64,
+}
+
+#[derive(Debug)]
+struct PhraseCandidate {
+    text: String,
+    start_ms: u64,
+    end_ms: u64,
+    byte_end: usize,
+    last_part_of_speech: String,
+    ends_with_particle: bool,
+    incomplete_inflection: bool,
+}
+
+fn push_morpheme(
+    morpheme: TimedMorpheme,
+    phrase: &mut Option<PhraseCandidate>,
+    phrases: &mut Vec<PhraseCandidate>,
+) {
+    if let Some(current) = phrase.as_ref()
+        && current.byte_end != morpheme.byte_start
+    {
+        finish_phrase(phrase, phrases);
+    }
+
+    if morpheme.part_of_speech == "助詞" {
+        if let Some(current) = phrase.as_mut() {
+            current.text.push_str(&morpheme.surface);
+            current.end_ms = current.end_ms.max(morpheme.end_ms);
+            current.byte_end = morpheme.byte_end;
+            current
+                .last_part_of_speech
+                .clone_from(&morpheme.part_of_speech);
+            current.ends_with_particle = true;
+        }
+        return;
+    }
+
+    let is_suffix = morpheme.subcategory == "接尾";
+    if morpheme.part_of_speech == "助動詞" || is_suffix {
+        if let Some(current) = phrase.as_mut() {
+            append_morpheme(current, &morpheme);
+        }
+        return;
+    }
+
+    let joins_compound = phrase.as_ref().is_some_and(|current| {
+        !current.ends_with_particle
+            && ((current.last_part_of_speech == "名詞" && morpheme.part_of_speech == "名詞")
+                || current.last_part_of_speech == "接頭詞")
+    });
+    if joins_compound {
+        append_morpheme(phrase.as_mut().unwrap(), &morpheme);
+    } else {
+        finish_phrase(phrase, phrases);
+        *phrase = Some(PhraseCandidate {
+            text: morpheme.surface.clone(),
+            start_ms: morpheme.start_ms,
+            end_ms: morpheme.end_ms,
+            byte_end: morpheme.byte_end,
+            last_part_of_speech: morpheme.part_of_speech.clone(),
+            ends_with_particle: false,
+            incomplete_inflection: is_incomplete_inflection(&morpheme),
+        });
+    }
+}
+
+fn append_morpheme(phrase: &mut PhraseCandidate, morpheme: &TimedMorpheme) {
+    phrase.text.push_str(&morpheme.surface);
+    phrase.start_ms = phrase.start_ms.min(morpheme.start_ms);
+    phrase.end_ms = phrase.end_ms.max(morpheme.end_ms);
+    phrase.byte_end = morpheme.byte_end;
+    phrase
+        .last_part_of_speech
+        .clone_from(&morpheme.part_of_speech);
+    phrase.ends_with_particle = false;
+    phrase.incomplete_inflection = is_incomplete_inflection(morpheme);
+}
+
+fn is_incomplete_inflection(morpheme: &TimedMorpheme) -> bool {
+    morpheme.part_of_speech == "動詞"
+        && matches!(
+            morpheme.conjugation_form.as_str(),
+            "未然形" | "未然ウ接続" | "連用形" | "連用タ接続" | "連用ニ接続" | "体言接続特殊２"
+        )
+}
+
+fn finish_phrase(phrase: &mut Option<PhraseCandidate>, phrases: &mut Vec<PhraseCandidate>) {
+    if let Some(phrase) = phrase.take()
+        && !phrase.incomplete_inflection
+    {
+        phrases.push(phrase);
+    }
 }
 
 fn segment_candidate(
@@ -549,6 +673,7 @@ fn align_character_times(text: &str, tokens: &[WhisperToken]) -> Option<Vec<Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     #[ignore = "requires local ffmpeg, whisper-cli, a model and CUTUP_TEST_INPUT"]
     fn splitter_transcribes_input_with_invalid_short_segment_utf8() {
@@ -717,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn splitting_returns_japanese_morphemes_with_token_times() {
+    fn splitting_returns_japanese_phrases_with_token_times() {
         let candidates = parse_word_transcript(
             r#"{"result":{"language":"ja"},"transcription":[{"text":"猫が走った。","offsets":{"from":0,"to":700},"tokens":[{"text":"猫","offsets":{"from":100,"to":200}},{"text":"が","offsets":{"from":200,"to":260}},{"text":"走","offsets":{"from":260,"to":400}},{"text":"っ","offsets":{"from":400,"to":450}},{"text":"た","offsets":{"from":450,"to":500}},{"text":"。","offsets":{"from":500,"to":550}}]}]}"#.as_bytes(),
             "ggml-tiny.bin",
@@ -725,12 +850,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(candidates.iter().any(|candidate| candidate.text == "猫"));
-        assert!(candidates.iter().any(|candidate| candidate.text == "が"));
+        assert!(candidates.iter().any(|candidate| candidate.text == "猫が"));
         assert!(
             candidates
                 .iter()
-                .any(|candidate| candidate.text.contains("走"))
+                .any(|candidate| candidate.text == "走った")
         );
         assert!(
             candidates.iter().all(|candidate| {
@@ -753,10 +877,49 @@ mod tests {
                 .iter()
                 .map(|candidate| candidate.text.as_str())
                 .collect::<Vec<_>>(),
-            ["猫", "が"]
+            ["猫が"]
         );
-        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 100));
-        assert_eq!((candidates[1].start_ms, candidates[1].end_ms), (100, 160));
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 160));
+    }
+
+    #[test]
+    fn splitting_groups_nouns_particles_and_verb_auxiliaries() {
+        let candidates = parse_word_transcript(
+            r#"{"transcription":[{"text":"青森の梨。今年も来た","offsets":{"from":0,"to":700},"tokens":[{"text":"青森","offsets":{"from":10,"to":180}},{"text":"の","offsets":{"from":180,"to":220}},{"text":"梨","offsets":{"from":220,"to":300}},{"text":"。","offsets":{"from":300,"to":320}},{"text":"今年","offsets":{"from":350,"to":430}},{"text":"も","offsets":{"from":430,"to":470}},{"text":"来","offsets":{"from":470,"to":530}},{"text":"た","offsets":{"from":530,"to":580}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+
+        let phrases = candidates
+            .iter()
+            .map(|candidate| candidate.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(phrases, ["青森の", "梨", "今年も", "来た"]);
+        assert_eq!((candidates[0].start_ms, candidates[0].end_ms), (10, 220));
+        assert_eq!((candidates[3].start_ms, candidates[3].end_ms), (470, 580));
+    }
+
+    #[test]
+    fn splitting_joins_a_split_suffix_and_drops_standalone_fragments() {
+        let joined = parse_word_transcript(
+            r#"{"transcription":[{"text":"つがる","offsets":{"from":0,"to":100},"tokens":[{"text":"つ","offsets":{"from":10,"to":40}},{"text":"がる","offsets":{"from":40,"to":90}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].text, "つがる");
+        assert_eq!((joined[0].start_ms, joined[0].end_ms), (10, 90));
+
+        let fragments = parse_word_transcript(
+            r#"{"transcription":[{"text":"としもきた","offsets":{"from":0,"to":300},"tokens":[{"text":"と","offsets":{"from":10,"to":30}},{"text":"し","offsets":{"from":30,"to":70}},{"text":"も","offsets":{"from":70,"to":110}},{"text":"き","offsets":{"from":110,"to":170}},{"text":"た","offsets":{"from":170,"to":210}}]}]}"#.as_bytes(),
+            "ggml-tiny.bin",
+            "sha256:test",
+        )
+        .unwrap();
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].text, "きた");
     }
 
     #[test]
@@ -816,7 +979,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires CUTUP_TEST_DTW_JSON from a whisper.cpp -ojf -dtw run"]
-    fn measures_issue_35_word_candidate_counts() {
+    fn measures_issue_35_phrase_candidate_counts() {
         let json =
             fs::read(std::env::var_os("CUTUP_TEST_DTW_JSON").expect("set CUTUP_TEST_DTW_JSON"))
                 .unwrap();
@@ -837,15 +1000,15 @@ mod tests {
         }
         let candidates =
             parse_word_transcript(&json, "ggml-tiny.bin", "sha256:evaluation").unwrap();
-        let unique_words = candidates
+        let unique_phrases = candidates
             .iter()
             .filter(|candidate| {
-                candidate.evidence.as_deref() == Some("Whisperの時刻と形態素解析による単語候補")
+                candidate.evidence.as_deref() == Some("Whisperの時刻と形態素解析でまとめた語句候補")
             })
             .count();
-        let segment_fallbacks = candidates.len() - unique_words;
+        let segment_fallbacks = candidates.len() - unique_phrases;
         eprintln!(
-            "segments={segment_count} morpheme_occurrences={morpheme_occurrences} unique_word_candidates={unique_words} segment_fallbacks={segment_fallbacks}"
+            "segments={segment_count} morpheme_occurrences={morpheme_occurrences} unique_phrase_candidates={unique_phrases} segment_fallbacks={segment_fallbacks}"
         );
     }
 }
