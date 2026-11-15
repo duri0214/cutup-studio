@@ -417,21 +417,33 @@ fn range_slider(
     let end_x = x(*end);
     let id = ui.id().with(("range_handle", index));
     let mut changed = false;
-    if let Some(pos) = response.interact_pointer_pos() {
-        if response.drag_started() || response.clicked() {
-            ui.ctx()
-                .data_mut(|d| d.insert_temp(id, (pos.x - start_x).abs() <= (pos.x - end_x).abs()));
-        }
-        if response.dragged() || response.clicked() {
-            let value = ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * duration;
-            let is_start = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
-            if is_start {
-                *start = value.min((*end - 0.001).max(0.0));
+    if response.drag_started() || response.clicked() {
+        let origin = ui.input(|input| input.pointer.press_origin());
+        let handle = origin.and_then(|pos| {
+            let start_distance = (pos.x - start_x).abs();
+            let end_distance = (pos.x - end_x).abs();
+            if start_distance.min(end_distance) <= 10.0 {
+                Some(start_distance <= end_distance)
             } else {
-                *end = value.max((*start + 0.001).min(duration));
+                None
             }
-            changed = true;
+        });
+        ui.ctx().data_mut(|data| data.insert_temp(id, handle));
+    }
+    if (response.dragged() || response.clicked())
+        && let Some(pos) = response.interact_pointer_pos()
+        && let Some(is_start) = ui
+            .ctx()
+            .data(|data| data.get_temp::<Option<bool>>(id))
+            .flatten()
+    {
+        let value = ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * duration;
+        if is_start {
+            *start = value.min((*end - 0.001).max(0.0));
+        } else {
+            *end = value.max((*start + 0.001).min(duration));
         }
+        changed = true;
     }
     let painter = ui.painter();
     let y = rect.center().y;
@@ -528,6 +540,89 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "テッカマン");
         assert_eq!((segments[0].start_ms, segments[0].end_ms), (0, 900));
+    }
+
+    #[test]
+    fn save_icon_does_not_change_range_and_handles_still_drag() {
+        use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput};
+        fn frame(
+            ctx: &egui::Context,
+            events: Vec<Event>,
+            start: &mut f64,
+            end: &mut f64,
+        ) -> (Pos2, Pos2, bool) {
+            let mut save = Pos2::ZERO;
+            let mut handle = Pos2::ZERO;
+            let mut clicked = false;
+            let _ = ctx.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
+                                let left = ui.next_widget_position();
+                                let width = (ui.available_width() - 90.0).max(20.0);
+                                handle = egui::pos2(
+                                    left.x + 7.0 + (width - 14.0) * (*start as f32 / 100.0),
+                                    left.y + 14.0,
+                                );
+                                super::range_slider(ui, 0, 100.0, start, end);
+                                super::theme::icon_button(
+                                    ui,
+                                    super::theme::ActionIcon::Play,
+                                    "play",
+                                    super::theme::ButtonKind::Normal,
+                                );
+                                let response = super::theme::icon_button(
+                                    ui,
+                                    super::theme::ActionIcon::Save,
+                                    "save",
+                                    super::theme::ButtonKind::Normal,
+                                );
+                                save = response.rect.center();
+                                clicked = response.clicked();
+                            });
+                        });
+                    });
+                },
+            );
+            (save, handle, clicked)
+        }
+        fn pointer(pos: Pos2, pressed: bool) -> Event {
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::default(),
+            }
+        }
+        let ctx = egui::Context::default();
+        super::theme::install(&ctx);
+        let (mut start, mut end) = (20.0, 40.0);
+        let (save, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        frame(
+            &ctx,
+            vec![Event::PointerMoved(save), pointer(save, true)],
+            &mut start,
+            &mut end,
+        );
+        let (_, handle, clicked) = frame(&ctx, vec![pointer(save, false)], &mut start, &mut end);
+        assert!(clicked);
+        assert_eq!((start, end), (20.0, 40.0));
+        frame(
+            &ctx,
+            vec![Event::PointerMoved(handle), pointer(handle, true)],
+            &mut start,
+            &mut end,
+        );
+        let moved = handle + egui::vec2(20.0, 0.0);
+        frame(&ctx, vec![Event::PointerMoved(moved)], &mut start, &mut end);
+        frame(&ctx, vec![pointer(moved, false)], &mut start, &mut end);
+        assert!(start > 20.0 && start < end);
     }
 
     #[cfg(windows)]
