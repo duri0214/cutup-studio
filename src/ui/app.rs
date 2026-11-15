@@ -735,27 +735,30 @@ impl StudioApp {
                     populated_order += 1;
                     Some(populated_order - 1)
                 };
-                let label = slot_index.map_or_else(
-                    String::new,
-                    |slot_index| format!("{:02}", slot_index + 1),
-                );
+                let row_number = format!("{:02}", index + 1);
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
                     if drag_response.drag_started() {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    ui.add_sized(
-                        [theme::SPACE_XL, 24.0],
-                        egui::Label::new(theme::detail_muted(label)),
+                    let (number_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(theme::SPACE_XL, 24.0),
+                        egui::Sense::hover(),
                     );
-                    if theme::role_label(
+                    let role_response = theme::role_label(
                         ui,
                         &guide_input.role,
                         slot_index == self.active_slot,
-                    )
-                    .clicked()
-                    {
+                    );
+                    ui.painter().text(
+                        egui::pos2(number_rect.center().x, role_response.rect.center().y),
+                        egui::Align2::CENTER_CENTER,
+                        row_number,
+                        egui::FontId::proportional(theme::DETAIL_TEXT_SIZE),
+                        theme::MUTED,
+                    );
+                    if role_response.clicked() {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
