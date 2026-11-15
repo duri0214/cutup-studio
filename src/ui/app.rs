@@ -166,7 +166,7 @@ impl StudioApp {
 
     fn create_catalog(&mut self, context: &egui::Context) {
         let Some(root) = rfd::FileDialog::new()
-            .set_title("基準フォルダを選択（materials フォルダが必要）")
+            .set_title("基準フォルダを選択")
             .pick_folder()
         else {
             return;
@@ -554,7 +554,7 @@ impl StudioApp {
             }
             section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status, self.catalog_attempt);
             ui.label(theme::detail_muted(
-                "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
+                "NEW で基準フォルダに materials/ とカタログを作成します。",
             ));
             ui.add_space(theme::SPACE_XS);
             ui.add_enabled_ui(

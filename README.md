@@ -27,7 +27,7 @@ cargo run
 ## 使い方
 
 1. 最初に選びます。
-   - `NEW`: `materials/` がある基準フォルダを選ぶ。そこに固定名の `material-catalog.sqlite` を作る
+   - `NEW`: 基準フォルダを選ぶ。`materials/` がなければ作成し、固定名の `material-catalog.sqlite` を作る
    - `OPEN`: 前回使った基準フォルダを選ぶ。固定名の `material-catalog.sqlite` を開く
    - `DEMO`: 同梱素材で試す
 2. 素材を走査したら、仮組みとして `素材の情報を登録` で素材に入っている言葉、タグ、役割を保存します。将来はローカルLLMがこの工程を自動化します。素材ファイル1本が、そのまま候補の単位です。
