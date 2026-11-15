@@ -466,7 +466,7 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
-        if self.splitter.error().is_some() {
+        if self.active_section == Section::Catalog && self.splitter.error().is_some() {
             return (theme::State::Error, "ERROR");
         }
         if self.status.starts_with("RELATED ERROR")
@@ -539,6 +539,7 @@ impl StudioApp {
             .clicked()
             {
                 self.active_section = Section::Catalog;
+                self.splitter.open = false;
                 if let Some(editor) = &mut self.editor {
                     editor.open = true;
                 }
@@ -552,6 +553,7 @@ impl StudioApp {
                 if theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal).clicked()
                 {
                     self.splitter.open = true;
+                    self.active_section = Section::Catalog;
                 }
                 ui.horizontal(|ui| {
                     if theme::action_button(
@@ -613,6 +615,7 @@ impl StudioApp {
                 {
                     editor.open = true;
                     self.active_section = Section::Catalog;
+                    self.splitter.open = false;
                 }
             });
             if let Some(catalog) = &self.catalog {
@@ -1088,7 +1091,7 @@ impl eframe::App for StudioApp {
             .as_ref()
             .map(CatalogEditor::settings)
             .unwrap_or_else(|| self.editor_settings.clone());
-        self.splitter.show(context, &settings);
+        self.splitter.poll(context);
         if context.input(|input| input.viewport().close_requested()) {
             let metadata_dirty = self
                 .editor
@@ -1232,7 +1235,11 @@ impl eframe::App for StudioApp {
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
-                if let Some(error) = self.splitter.error() {
+                if let Some(error) = self
+                    .splitter
+                    .error()
+                    .filter(|_| self.active_section == Section::Catalog)
+                {
                     theme::state_message(ui, theme::State::Error, error);
                 } else if let Some((state, message)) = self
                     .editor
@@ -1252,7 +1259,9 @@ impl eframe::App for StudioApp {
             .frame(theme::content_frame())
             .show(context, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.active_section == Section::Catalog && registering {
+                    if self.active_section == Section::Catalog && self.splitter.open {
+                        self.splitter.show(ui, &settings);
+                    } else if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =
                                 editor.message().map(|(_, text)| text.to_owned());

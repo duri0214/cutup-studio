@@ -59,7 +59,7 @@ impl Splitter {
     pub fn error(&self) -> Option<&str> {
         self.open.then_some(self.error.as_deref()).flatten()
     }
-    pub fn show(&mut self, ctx: &Context, settings: &EditorSettings) {
+    pub fn poll(&mut self, ctx: &Context) {
         if let Some(task) = &self.task {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input))) => {
@@ -97,14 +97,15 @@ impl Splitter {
                 }
             }
         }
-        if !self.open {
-            return;
-        }
-        let mut open = self.open;
-        egui::Window::new("動画から素材を切り出す")
-            .open(&mut open)
-            .resizable(true)
-            .show(ctx, |ui| {
+    }
+    pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings) {
+        theme::panel().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(theme::section_title("動画から素材を切り出す"));
+                    if theme::button(ui, "閉じる", theme::ButtonKind::Normal).clicked() {
+                        self.open = false;
+                    }
+                });
                 let busy = self.task.is_some() || self.operation.is_some();
                 ui.label("必要なツール（ファイルの有無）");
                 egui::Grid::new("splitter_tool_status").show(ui, |ui| {
@@ -259,7 +260,6 @@ impl Splitter {
                     theme::state_message(ui, theme::State::Error, error);
                 }
             });
-        self.open = open;
     }
     fn run_operation(&mut self, output: Option<PathBuf>) {
         let Some(input) = self.input.clone() else {
