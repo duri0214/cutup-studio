@@ -213,7 +213,7 @@ pub fn pane_title(ui: &mut Ui, text: &str) {
     let title = Frame::new()
         .inner_margin(egui::Margin {
             left: SPACE_LG as i8,
-            right: 0,
+            right: SPACE_LG as i8,
             top: vertical_padding,
             bottom: vertical_padding,
         })
