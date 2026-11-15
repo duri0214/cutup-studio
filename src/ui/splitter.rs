@@ -265,7 +265,9 @@ impl Splitter {
                             self.save_all(root.to_owned());
                         }
                         let mut action = None;
-                        results_scroll_area(reset_scroll).show(ui, |ui| {
+                        ui.scope(|ui| {
+                            ui.style_mut().spacing.scroll.floating = false;
+                            results_scroll_area(reset_scroll).show(ui, |ui| {
                             let label_width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
@@ -287,6 +289,7 @@ impl Splitter {
                                     if theme::icon_button(ui, theme::ActionIcon::Save, "WAVに保存", theme::ButtonKind::Normal).clicked() { action = Some((index, true)); }
                                 });
                             }
+                            });
                         });
                         if let Some((index, save)) = action {
                             let segment = &self.segments[index];
@@ -424,7 +427,7 @@ fn range_slider(
     start: &mut f64,
     end: &mut f64,
 ) -> bool {
-    let width = (ui.available_width() - 106.0).max(20.0);
+    let width = (ui.available_width() - 130.0).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
@@ -619,6 +622,74 @@ mod tests {
     }
 
     #[test]
+    fn save_button_right_edge_is_clear_of_scrollbar() {
+        use eframe::egui::{self, Event, Modifiers, PointerButton, RawInput};
+        fn frame(ctx: &egui::Context, events: Vec<Event>) -> (egui::Rect, f32, bool, f32) {
+            let mut save = egui::Rect::NOTHING;
+            let mut inner_right = 0.0;
+            let mut clicked = false;
+            let mut offset = 0.0;
+            let _ = ctx.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.set_width(500.0);
+                        ui.scope(|ui| {
+                            ui.style_mut().spacing.scroll.floating = false;
+                            let area = super::results_scroll_area(false).show(ui, |ui| {
+                                for index in 0..20 {
+                                    ui.horizontal(|ui| {
+                                        super::segment_label(ui, "example", false, 150.0);
+                                        let (mut start, mut end) = (20.0, 40.0);
+                                        super::range_slider(ui, index, 100.0, &mut start, &mut end);
+                                        super::theme::icon_button(
+                                            ui,
+                                            super::theme::ActionIcon::Play,
+                                            "play",
+                                            super::theme::ButtonKind::Normal,
+                                        );
+                                        let response = super::theme::icon_button(
+                                            ui,
+                                            super::theme::ActionIcon::Save,
+                                            "save",
+                                            super::theme::ButtonKind::Normal,
+                                        );
+                                        if index == 0 {
+                                            save = response.rect;
+                                            clicked = response.clicked();
+                                        }
+                                    });
+                                }
+                            });
+                            inner_right = area.inner_rect.right();
+                            offset = area.state.offset.y;
+                        });
+                    });
+                },
+            );
+            (save, inner_right, clicked, offset)
+        }
+        let ctx = egui::Context::default();
+        super::theme::install(&ctx);
+        let (save, inner_right, _, _) = frame(&ctx, vec![]);
+        assert!(inner_right - save.right() >= 16.0);
+        let pos = egui::pos2(save.right() - 1.0, save.center().y);
+        let pointer = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        };
+        frame(&ctx, vec![Event::PointerMoved(pos), pointer(true)]);
+        let (_, _, clicked, offset) = frame(&ctx, vec![pointer(false)]);
+        assert!(clicked);
+        assert_eq!(offset, 0.0);
+    }
+
+    #[test]
     fn save_icon_does_not_change_range_and_handles_still_drag() {
         use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput};
         fn frame(
@@ -641,7 +712,7 @@ mod tests {
                             ui.horizontal(|ui| {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
                                 let left = ui.next_widget_position();
-                                let width = (ui.available_width() - 106.0).max(20.0);
+                                let width = (ui.available_width() - 130.0).max(20.0);
                                 handle = egui::pos2(
                                     left.x + 7.0 + (width - 14.0) * (*start as f32 / 100.0),
                                     left.y + 14.0,
