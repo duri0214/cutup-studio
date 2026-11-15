@@ -37,9 +37,17 @@ enum InputSource {
     Local,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum SplitterTab {
+    #[default]
+    Input,
+    Results,
+}
+
 #[derive(Default)]
 pub(super) struct Splitter {
     pub open: bool,
+    active_tab: SplitterTab,
     source: InputSource,
     input: Option<PathBuf>,
     url: String,
@@ -97,6 +105,7 @@ impl Splitter {
                     self.segments = valid_segments(segments, duration);
                     self.reset_result_scroll = true;
                     self.result_ready = true;
+                    self.active_tab = SplitterTab::Results;
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -147,15 +156,37 @@ impl Splitter {
         root: &std::path::Path,
     ) {
         theme::panel().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    theme::pane_title(ui, "動画から素材を切り出す");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::icon_button(ui, theme::ActionIcon::Close, "閉じる", theme::ButtonKind::Normal).clicked() {
-                            self.open = false;
-                        }
-                    });
+            let busy = self.is_busy();
+            ui.horizontal(|ui| {
+                theme::pane_title(ui, "動画から素材を切り出す");
+                ui.add_space(theme::SPACE_XS);
+                if theme::tab(ui, "入力", self.active_tab == SplitterTab::Input, 52.0).clicked() {
+                    self.active_tab = SplitterTab::Input;
+                }
+                if ui
+                    .add_enabled_ui(busy || self.result_ready, |ui| {
+                        theme::tab(ui, "結果", self.active_tab == SplitterTab::Results, 52.0)
+                    })
+                    .inner
+                    .clicked()
+                {
+                    self.active_tab = SplitterTab::Results;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::icon_button(
+                        ui,
+                        theme::ActionIcon::Close,
+                        "閉じる",
+                        theme::ButtonKind::Normal,
+                    )
+                    .clicked()
+                    {
+                        self.open = false;
+                    }
                 });
-                let busy = self.task.is_some() || self.operation.is_some();
+            });
+
+            if self.active_tab == SplitterTab::Input {
                 let previous_candidate_width = settings.candidate_width;
                 ui.label("必要なツール（ファイルの有無）");
                 egui::Grid::new("splitter_tool_status").show(ui, |ui| {
@@ -165,7 +196,8 @@ impl Splitter {
                         ("モデル", std::path::Path::new(&settings.model_path).is_file()),
                         ("yt-dlp（動画から音声を取得）", executable_exists("yt-dlp")),
                     ] {
-                        theme::availability_indicator(ui, present).on_hover_text(if present { "利用可能" } else { "見つかりません" });
+                        theme::availability_indicator(ui, present)
+                            .on_hover_text(if present { "利用可能" } else { "見つかりません" });
                         ui.label(name);
                         ui.end_row();
                     }
@@ -209,12 +241,14 @@ impl Splitter {
                         InputSource::Youtube => {
                             let width = ui.available_width().max(120.0);
                             let response = theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width);
-                            submit_url = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) && !self.url.trim().is_empty();
+                            submit_url = response.lost_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                && !self.url.trim().is_empty();
                             if response.changed() {
                                 self.input = None;
                                 self.downloaded = None;
                                 self.segments.clear();
-            self.result_ready = false;
+                                self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -226,7 +260,7 @@ impl Splitter {
                             {
                                 self.input = Some(path);
                                 self.segments.clear();
-            self.result_ready = false;
+                                self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -241,7 +275,8 @@ impl Splitter {
                             self.input.is_some() || !self.url.trim().is_empty(),
                             egui::Button::new("音声を抽出・文字起こし"),
                         )
-                        .clicked() || submit_url
+                        .clicked()
+                        || submit_url
                     {
                         let local_input = self.input.clone();
                         let url = self.url.trim().to_owned();
@@ -255,7 +290,7 @@ impl Splitter {
                         let (tx, rx) = mpsc::channel();
                         self.task = Some(rx);
                         self.segments.clear();
-            self.result_ready = false;
+                        self.result_ready = false;
                         self.selected = None;
                         self.error = None;
                         std::thread::spawn(move || {
@@ -282,26 +317,49 @@ impl Splitter {
                             let _ = tx.send(result);
                         });
                     }
-                    if !self.segments.is_empty() {
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        let reset_scroll = std::mem::take(&mut self.reset_result_scroll);
-                        let heading = ui.label("文字起こし結果");
-                        if reset_scroll {
-                            heading.scroll_to_me(Some(egui::Align::Min));
-                        }
-                        if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
-                            self.save_all(root.to_owned());
-                        }
-                        let mut action = None;
-                        ui.scope(|ui| {
-                            ui.style_mut().spacing.scroll.floating = false;
-                            results_scroll_area(reset_scroll).show(ui, |ui| {
+                });
+                if settings.candidate_width != previous_candidate_width {
+                    self.segments.clear();
+                    self.result_ready = false;
+                    self.selected = None;
+                    self.error = None;
+                }
+                if busy {
+                    theme::progress_message(ui, "処理中…");
+                }
+            } else if self.segments.is_empty() {
+                if busy {
+                    theme::progress_message(ui, "処理中…");
+                } else if self.result_ready {
+                    ui.label("候補がありません。入力タブから別の動画を選んでください。");
+                } else {
+                    ui.label("文字起こし後に、候補をここに表示します。");
+                }
+            } else {
+                let mut action = None;
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("文字起こし結果");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
+                                self.save_all(root.to_owned());
+                            }
+                        });
+                    });
+                    ui.scope(|ui| {
+                        ui.style_mut().spacing.scroll.floating = false;
+                        results_scroll_area(std::mem::take(&mut self.reset_result_scroll)).show(ui, |ui| {
                             let label_width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
-                                    if segment_label(ui, &segment.text, self.selected == Some(index), label_width).clicked() {
+                                    if segment_label(
+                                        ui,
+                                        &segment.text,
+                                        self.selected == Some(index),
+                                        label_width,
+                                    )
+                                    .clicked()
+                                    {
                                         self.selected = Some(index);
                                         self.start = segment.start_ms as f64 / 1000.0;
                                         self.end = segment.end_ms as f64 / 1000.0;
@@ -315,37 +373,49 @@ impl Splitter {
                                         self.start = start;
                                         self.end = end;
                                     }
-                                    if theme::icon_button(ui, theme::ActionIcon::Play, "再生", theme::ButtonKind::Normal).clicked() { action = Some((index, false)); }
-                                    if theme::icon_button(ui, theme::ActionIcon::Save, "WAVに保存", theme::ButtonKind::Normal).clicked() { action = Some((index, true)); }
+                                    if theme::icon_button(
+                                        ui,
+                                        theme::ActionIcon::Play,
+                                        "再生",
+                                        theme::ButtonKind::Normal,
+                                    )
+                                    .clicked()
+                                    {
+                                        action = Some((index, false));
+                                    }
+                                    if theme::icon_button(
+                                        ui,
+                                        theme::ActionIcon::Save,
+                                        "WAVに保存",
+                                        theme::ButtonKind::Normal,
+                                    )
+                                    .clicked()
+                                    {
+                                        action = Some((index, true));
+                                    }
                                 });
                             }
-                            });
                         });
-                        if let Some((index, save)) = action {
-                            let segment = &self.segments[index];
-                            self.selected = Some(index);
-                            self.start = segment.start_ms as f64 / 1000.0;
-                            self.end = segment.end_ms as f64 / 1000.0;
-                            let output = save.then(|| (root.to_owned(), segment.text.clone()));
-                            self.run_operation(output);
-                        }
-                    }
-
+                    });
                 });
-                if settings.candidate_width != previous_candidate_width {
-                    self.segments.clear();
-                    self.result_ready = false;
-                    self.selected = None;
-                    self.error = None;
+                if let Some((index, save)) = action {
+                    let segment = &self.segments[index];
+                    self.selected = Some(index);
+                    self.start = segment.start_ms as f64 / 1000.0;
+                    self.end = segment.end_ms as f64 / 1000.0;
+                    let output = save.then(|| (root.to_owned(), segment.text.clone()));
+                    self.run_operation(output);
                 }
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 }
-if let Some(error) = &self.error {
-                    theme::state_message(ui, theme::State::Error, error);
-                }
-            });
+            }
+            if let Some(error) = &self.error {
+                theme::state_message(ui, theme::State::Error, error);
+            }
+        });
     }
+
     fn save_all(&mut self, root: PathBuf) {
         let Some(input) = self.input.clone() else {
             return;
@@ -440,7 +510,7 @@ fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<Analys
 fn results_scroll_area(reset: bool) -> egui::ScrollArea {
     let area = egui::ScrollArea::vertical()
         .id_salt("splitter_segments_scroll")
-        .max_height(180.0)
+        .max_height(480.0)
         .auto_shrink([false, true]);
     if reset {
         area.vertical_scroll_offset(0.0)
@@ -553,6 +623,27 @@ fn play(path: &std::path::Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn completed_transcription_opens_the_results_tab() {
+        use eframe::egui::Context;
+        use std::sync::mpsc;
+
+        let (sender, receiver) = mpsc::channel();
+        let mut splitter = super::Splitter {
+            open: true,
+            task: Some(receiver),
+            ..Default::default()
+        };
+        sender
+            .send(Ok((Vec::new(), None, "input.wav".into(), 1.0)))
+            .expect("the analysis receiver should still be open");
+
+        splitter.poll(&Context::default());
+
+        assert!(splitter.active_tab == super::SplitterTab::Results);
+        assert_eq!(splitter.result_count(), Some(0));
+    }
+
     #[test]
     fn changing_source_discards_the_previous_selection() {
         let mut splitter = super::Splitter {
