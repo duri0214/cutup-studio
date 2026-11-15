@@ -374,7 +374,7 @@ impl Splitter {
                                     }
                                     let mut start = segment.start_ms as f64 / 1000.0;
                                     let mut end = segment.end_ms as f64 / 1000.0;
-                                    if range_slider(ui, index, self.duration, &mut start, &mut end) {
+                                    if range_slider(ui, index, self.duration, &mut start, &mut end).0 {
                                         segment.start_ms = (start * 1000.0).round() as u64;
                                         segment.end_ms = (end * 1000.0).round() as u64;
                                         self.selected = Some(index);
@@ -552,23 +552,19 @@ fn range_slider(
     duration: f64,
     start: &mut f64,
     end: &mut f64,
-) -> bool {
+) -> (bool, egui::Rect) {
     const TRAILING_WIDTH: f32 = 92.0; // Two icons, their gaps, and 16 px before the scrollbar.
     let width = (ui.available_width() - TRAILING_WIDTH).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
-        return false;
+        return (false, rect);
     }
     let left = rect.left() + 7.0;
     let right = rect.right() - 7.0;
     let initial_window = slider_window(duration, *start, *end);
     let view_id = ui.id().with(("range_view", index));
-    if response.drag_started() {
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(view_id, [initial_window.0, initial_window.1]));
-    }
-    let (view_start, view_end) = if response.dragged() {
+    let (view_start, view_end) = if response.dragged() || response.has_focus() {
         ui.ctx()
             .data(|data| data.get_temp::<[f64; 2]>(view_id))
             .map(|window| (window[0], window[1]))
@@ -587,8 +583,15 @@ fn range_slider(
     let end_x = x(*end);
     let id = ui.id().with(("range_handle", index));
     let mut changed = false;
-    if response.drag_started() || response.clicked() {
-        let origin = ui.input(|input| input.pointer.press_origin());
+    let primary_pressed = response.hovered()
+        && ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary));
+    if response.drag_started() || response.clicked() || primary_pressed {
+        let origin = if response.clicked() {
+            response.interact_pointer_pos()
+        } else {
+            ui.input(|input| input.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+        };
         let handle = origin.and_then(|pos| {
             let start_distance = (pos.x - start_x).abs();
             let end_distance = (pos.x - end_x).abs();
@@ -598,7 +601,15 @@ fn range_slider(
                 None
             }
         });
-        ui.ctx().data_mut(|data| data.insert_temp(id, handle));
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(id, handle);
+            if handle.is_some() {
+                data.insert_temp(view_id, [view_start, view_end]);
+            }
+        });
+        if handle.is_some() {
+            response.request_focus();
+        }
     }
     if (response.dragged() || response.clicked())
         && let Some(pos) = response.interact_pointer_pos()
@@ -616,6 +627,38 @@ fn range_slider(
         }
         changed = true;
     }
+    let selected_handle = ui
+        .ctx()
+        .data(|data| data.get_temp::<Option<bool>>(id))
+        .flatten();
+    if response.has_focus()
+        && let Some(is_start) = selected_handle
+        && let Some(delta) = ui.input(|input| {
+            if input.key_pressed(egui::Key::ArrowLeft) {
+                Some(-0.01)
+            } else if input.key_pressed(egui::Key::ArrowRight) {
+                Some(0.01)
+            } else {
+                None
+            }
+        })
+    {
+        if is_start {
+            let maximum = (*end - 0.001).max(0.0);
+            let adjusted = (*start + delta).clamp(0.0, maximum);
+            if adjusted != *start {
+                *start = adjusted;
+                changed = true;
+            }
+        } else {
+            let minimum = (*start + 0.001).min(duration);
+            let adjusted = (*end + delta).clamp(minimum, duration);
+            if adjusted != *end {
+                *end = adjusted;
+                changed = true;
+            }
+        }
+    }
     let painter = ui.painter();
     let y = rect.center().y;
     painter.line_segment(
@@ -626,18 +669,23 @@ fn range_slider(
         [egui::pos2(x(*start), y), egui::pos2(x(*end), y)],
         egui::Stroke::new(5.0_f32, theme::ACCENT),
     );
-    for position in [x(*start), x(*end)] {
-        painter.rect_filled(
-            egui::Rect::from_center_size(egui::pos2(position, y), egui::vec2(9.0, 18.0)),
-            egui::CornerRadius::same(2),
-            theme::ACCENT,
-        );
+    for (is_start, position) in [(true, x(*start)), (false, x(*end))] {
+        let handle = egui::Rect::from_center_size(egui::pos2(position, y), egui::vec2(9.0, 18.0));
+        painter.rect_filled(handle, egui::CornerRadius::same(2), theme::ACCENT);
+        if response.has_focus() && selected_handle == Some(is_start) {
+            painter.rect_stroke(
+                handle,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(1.5_f32, theme::TEXT),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
     response.on_hover_text(format!(
-        "前後2秒を拡大表示（{view_start:.2}～{view_end:.2}秒）。開始 {:.2} 秒 / 終了 {:.2} 秒。両端をドラッグ",
+        "前後2秒を拡大表示（{view_start:.2}～{view_end:.2}秒）。開始 {:.2} 秒 / 終了 {:.2} 秒。端をクリックして←/→で0.01秒調整、ドラッグで範囲調整",
         *start, *end,
     ));
-    changed
+    (changed, rect)
 }
 
 #[cfg(windows)]
@@ -866,17 +914,19 @@ mod tests {
     }
 
     #[test]
-    fn save_icon_does_not_change_range_and_handles_still_drag() {
+    fn save_button_preserves_range_and_slider_supports_drag_and_keyboard() {
         use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput};
         fn frame(
             ctx: &egui::Context,
             events: Vec<Event>,
             start: &mut f64,
             end: &mut f64,
-        ) -> (Pos2, Pos2, bool) {
+        ) -> (Pos2, Pos2, Pos2, bool, Option<bool>) {
             let mut save = Pos2::ZERO;
-            let mut handle = Pos2::ZERO;
+            let mut start_handle = Pos2::ZERO;
+            let mut end_handle = Pos2::ZERO;
             let mut clicked = false;
+            let mut selected_handle = None;
             let _ = ctx.run(
                 RawInput {
                     events,
@@ -887,19 +937,27 @@ mod tests {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
-                                let left = ui.next_widget_position();
-                                let width = (ui.available_width() - 130.0).max(20.0);
-                                let (view_start, view_end) =
-                                    super::slider_window(100.0, *start, *end);
-                                handle = egui::pos2(
-                                    left.x
-                                        + 7.0
-                                        + (width - 14.0)
-                                            * ((*start - view_start) / (view_end - view_start))
-                                                as f32,
-                                    left.y + 14.0,
-                                );
-                                super::range_slider(ui, 0, 100.0, start, end);
+                                let (_, slider_rect) =
+                                    super::range_slider(ui, 0, 100.0, start, end);
+                                let view_id = ui.id().with(("range_view", 0));
+                                let (view_start, view_end) = ctx
+                                    .data(|data| data.get_temp::<[f64; 2]>(view_id))
+                                    .map(|window| (window[0], window[1]))
+                                    .unwrap_or_else(|| super::slider_window(100.0, *start, *end));
+                                let left = slider_rect.left() + 7.0;
+                                let right = slider_rect.right() - 7.0;
+                                let handle_x = |value: f64| {
+                                    egui::lerp(
+                                        left..=right,
+                                        ((value - view_start) / (view_end - view_start)) as f32,
+                                    )
+                                };
+                                start_handle = egui::pos2(handle_x(*start), slider_rect.center().y);
+                                end_handle = egui::pos2(handle_x(*end), slider_rect.center().y);
+                                let handle_id = ui.id().with(("range_handle", 0));
+                                selected_handle = ctx
+                                    .data(|data| data.get_temp::<Option<bool>>(handle_id))
+                                    .flatten();
                                 super::theme::icon_button(
                                     ui,
                                     super::theme::ActionIcon::Play,
@@ -919,7 +977,7 @@ mod tests {
                     });
                 },
             );
-            (save, handle, clicked)
+            (save, start_handle, end_handle, clicked, selected_handle)
         }
         fn pointer(pos: Pos2, pressed: bool) -> Event {
             Event::PointerButton {
@@ -932,14 +990,15 @@ mod tests {
         let ctx = egui::Context::default();
         super::theme::install(&ctx);
         let (mut start, mut end) = (20.0, 40.0);
-        let (save, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        let (save, _, _, _, _) = frame(&ctx, vec![], &mut start, &mut end);
         frame(
             &ctx,
             vec![Event::PointerMoved(save), pointer(save, true)],
             &mut start,
             &mut end,
         );
-        let (_, handle, clicked) = frame(&ctx, vec![pointer(save, false)], &mut start, &mut end);
+        let (_, handle, _, clicked, _) =
+            frame(&ctx, vec![pointer(save, false)], &mut start, &mut end);
         assert!(clicked);
         assert_eq!((start, end), (20.0, 40.0));
         frame(
@@ -952,6 +1011,72 @@ mod tests {
         frame(&ctx, vec![Event::PointerMoved(moved)], &mut start, &mut end);
         frame(&ctx, vec![pointer(moved, false)], &mut start, &mut end);
         assert!(start > 20.0 && start < end);
+
+        let (_, start_handle, _, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        frame(
+            &ctx,
+            vec![
+                Event::PointerMoved(start_handle),
+                pointer(start_handle, true),
+            ],
+            &mut start,
+            &mut end,
+        );
+        let (_, _, _, _, selected_handle) = frame(
+            &ctx,
+            vec![pointer(start_handle, false)],
+            &mut start,
+            &mut end,
+        );
+        assert!(
+            selected_handle == Some(true),
+            "start handle should be selected"
+        );
+        let before_arrow = start;
+        frame(
+            &ctx,
+            vec![Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: Some(egui::Key::ArrowRight),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::default(),
+            }],
+            &mut start,
+            &mut end,
+        );
+        assert!(
+            (start - before_arrow - 0.01).abs() < 1e-9,
+            "start changed from {before_arrow} to {start}"
+        );
+
+        let (_, _, end_handle, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        frame(
+            &ctx,
+            vec![Event::PointerMoved(end_handle), pointer(end_handle, true)],
+            &mut start,
+            &mut end,
+        );
+        let (_, _, _, _, selected_handle) =
+            frame(&ctx, vec![pointer(end_handle, false)], &mut start, &mut end);
+        assert!(
+            selected_handle == Some(false),
+            "end handle should be selected"
+        );
+        let before_end_arrow = end;
+        frame(
+            &ctx,
+            vec![Event::Key {
+                key: egui::Key::ArrowLeft,
+                physical_key: Some(egui::Key::ArrowLeft),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::default(),
+            }],
+            &mut start,
+            &mut end,
+        );
+        assert!((end - before_end_arrow + 0.01).abs() < 1e-9);
     }
 
     #[cfg(windows)]
