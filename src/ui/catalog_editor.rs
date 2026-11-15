@@ -768,11 +768,6 @@ impl CatalogEditor {
                 ));
             }
         }
-        ui.label(theme::detail_muted(if self.ollama_model.is_empty() {
-            "実行すると文字起こしが探す語句に入ります。設定で Ollama を選ぶと、タグと役割も補います。"
-        } else {
-            "実行すると探す語句・タグ・役割に情報を反映します。既存の値に重複しないよう追加します。"
-        }));
         self.show_message(ui);
     }
 
@@ -893,14 +888,10 @@ impl CatalogEditor {
                 ui.end_row();
             }
         });
+        self.analysis_controls(ui);
         ui.label(theme::detail_muted(
             "複数の探す語句・タグ・役割はカンマ区切りです。",
         ));
-        ui.separator();
-        ui.label(theme::detail_muted(
-            "設定タブで方式を選び、文字起こしを実行できます。",
-        ));
-        self.analysis_controls(ui);
         let selected = self.material_id.is_some();
         let mut changed = false;
         ui.checkbox(&mut self.keep_open, "連続で登録する");
