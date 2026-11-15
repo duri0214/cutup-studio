@@ -404,7 +404,8 @@ fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<Analys
 fn results_scroll_area(reset: bool) -> egui::ScrollArea {
     let area = egui::ScrollArea::vertical()
         .id_salt("splitter_segments_scroll")
-        .max_height(180.0);
+        .max_height(180.0)
+        .auto_shrink([false, true]);
     if reset {
         area.vertical_scroll_offset(0.0)
     } else {
@@ -427,7 +428,8 @@ fn range_slider(
     start: &mut f64,
     end: &mut f64,
 ) -> bool {
-    let width = (ui.available_width() - 130.0).max(20.0);
+    const TRAILING_WIDTH: f32 = 92.0; // Two icons, their gaps, and 16 px before the scrollbar.
+    let width = (ui.available_width() - TRAILING_WIDTH).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
