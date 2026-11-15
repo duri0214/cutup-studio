@@ -704,13 +704,20 @@ pub fn action_button(
 ) -> Response {
     let enabled = ui.is_enabled();
     let text_color = button_text_color(kind, enabled);
-    let mut button = egui::Button::image_and_text(
-        action_icon_image(icon),
+    let font = FontId::proportional(BUTTON_TEXT_SIZE);
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), text_color)
+        .size()
+        .x;
+    let icon_size = Vec2::splat(16.0);
+    let content_gap = SPACE_XS;
+    let content_width = icon_size.x + content_gap + text_width;
+    let mut button = egui::Button::new(
         RichText::new(label)
             .size(BUTTON_TEXT_SIZE)
-            .color(text_color),
+            .color(Color32::TRANSPARENT),
     )
-    .image_tint_follows_text_color(true)
     .min_size(size)
     .corner_radius(CONTROL_RADIUS);
     if enabled {
@@ -722,7 +729,24 @@ pub fn action_button(
                 .stroke(Stroke::new(1.0_f32, RED.gamma_multiply(0.5))),
         };
     }
-    ui.add_sized(size, button)
+    let response = ui.add_sized(size, button);
+    let content_left = response.rect.center().x - content_width * 0.5;
+    let center_y = response.rect.center().y;
+    paint_action_icon(
+        ui,
+        icon,
+        Pos2::new(content_left + icon_size.x * 0.5, center_y),
+        icon_size,
+        text_color,
+    );
+    ui.painter().text(
+        Pos2::new(content_left + icon_size.x + content_gap, center_y),
+        Align2::LEFT_CENTER,
+        label,
+        font,
+        text_color,
+    );
+    response
 }
 
 pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
