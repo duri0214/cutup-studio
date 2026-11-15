@@ -3,6 +3,41 @@ use std::{
     process::{Command, Stdio},
 };
 
+pub fn duration_seconds(input: &Path) -> Result<f64, String> {
+    let mut command = Command::new("ffprobe");
+    command
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(input)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command
+        .output()
+        .map_err(|e| format!("ffprobe を起動できません: {e}"))?;
+    if !output.status.success() {
+        return Err("動画の長さを取得できません。".into());
+    }
+    let duration = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| "動画の長さを読み取れません。")?;
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err("動画の長さが不正です。".into());
+    }
+    Ok(duration)
+}
+
 fn youtube_url(url: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(url).map_err(|_| "YouTube の動画 URL を入力してください。")?;
     if parsed.scheme() != "https"
@@ -187,6 +222,8 @@ mod tests {
     fn ffmpeg_cuts_audio_and_rejects_range_past_end() {
         let dir = tempfile::tempdir().unwrap();
         let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/materials/01-tekkaman.wav");
+        let duration = duration_seconds(&input).unwrap();
+        assert!(duration > 0.2);
         let output = dir.path().join("cut.wav");
         cut(&input, &output, 0.0, 0.2).unwrap();
         assert!(std::fs::metadata(&output).unwrap().len() > 78);

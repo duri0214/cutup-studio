@@ -18,8 +18,17 @@ use std::{
     },
 };
 
-type AnalysisTask =
-    Receiver<Result<(Vec<AnalysisCandidate>, Option<tempfile::TempDir>, PathBuf), String>>;
+type AnalysisTask = Receiver<
+    Result<
+        (
+            Vec<AnalysisCandidate>,
+            Option<tempfile::TempDir>,
+            PathBuf,
+            f64,
+        ),
+        String,
+    >,
+>;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum InputSource {
@@ -36,6 +45,7 @@ pub(super) struct Splitter {
     url: String,
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
+    duration: f64,
     selected: Option<usize>,
     start: f64,
     end: f64,
@@ -62,8 +72,17 @@ impl Splitter {
     pub fn poll(&mut self, ctx: &Context) {
         if let Some(task) = &self.task {
             match task.try_recv() {
-                Ok(Ok((segments, downloaded, input))) => {
-                    self.segments = segments;
+                Ok(Ok((segments, downloaded, input, duration))) => {
+                    self.segments = segments
+                        .into_iter()
+                        .filter_map(|mut segment| {
+                            let max_ms = (duration * 1000.0).round() as u64;
+                            segment.start_ms = segment.start_ms.min(max_ms);
+                            segment.end_ms = segment.end_ms.min(max_ms);
+                            (segment.end_ms > segment.start_ms).then_some(segment)
+                        })
+                        .collect();
+                    self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
                     self.selected = None;
@@ -193,38 +212,42 @@ impl Splitter {
                                 } else {
                                     local_input.ok_or("ローカル動画を選んでください。")?
                                 };
+                                let duration = splitter::duration_seconds(&input)?;
                                 let hash = local_stt::fingerprint(&input, &cancel)
                                     .map_err(|e| e.to_string())?;
                                 let segments =
                                     local_stt::transcribe(&config, &input, &hash, &cancel)
                                         .map_err(|e| e.to_string())?;
-                                Ok((segments, downloaded, input))
+                                Ok((segments, downloaded, input, duration))
                             })();
                             let _ = tx.send(result);
                         });
                     }
-                    egui::ScrollArea::vertical()
-                        .max_height(200.0)
-                        .show(ui, |ui| {
-                            for (index, segment) in self.segments.iter().enumerate() {
-                                if ui
-                                    .selectable_label(
-                                        self.selected == Some(index),
-                                        format!(
-                                            "{:.2}–{:.2} 秒  {}",
-                                            segment.start_ms as f64 / 1000.0,
-                                            segment.end_ms as f64 / 1000.0,
-                                            segment.text
-                                        ),
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected = Some(index);
-                                    self.start = segment.start_ms as f64 / 1000.0;
-                                    self.end = segment.end_ms as f64 / 1000.0;
+                    if !self.segments.is_empty() {
+                        ui.label(format!("文字起こし候補　全体 0.00–{:.2} 秒", self.duration));
+                        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                            egui::Grid::new("splitter_segments").striped(true).show(ui, |ui| {
+                                ui.label("台詞"); ui.label("範囲（動画全体）"); ui.label("開始–終了（秒）"); ui.end_row();
+                                for (index, segment) in self.segments.iter_mut().enumerate() {
+                                    if ui.selectable_label(self.selected == Some(index), &segment.text).clicked() {
+                                        self.selected = Some(index);
+                                        self.start = segment.start_ms as f64 / 1000.0;
+                                        self.end = segment.end_ms as f64 / 1000.0;
+                                    }
+                                    let mut start = segment.start_ms as f64 / 1000.0;
+                                    let mut end = segment.end_ms as f64 / 1000.0;
+                                    if range_slider(ui, index, self.duration, &mut start, &mut end) {
+                                        segment.start_ms = (start * 1000.0).round() as u64;
+                                        segment.end_ms = (end * 1000.0).round() as u64;
+                                        self.selected = Some(index);
+                                        self.start = start; self.end = end;
+                                    }
+                                    ui.label(format!("{start:.2}–{end:.2}"));
+                                    ui.end_row();
                                 }
-                            }
+                            });
                         });
+                    }
                     if self.selected.is_some() {
                         ui.horizontal(|ui| {
                             ui.label("開始（秒）");
@@ -240,6 +263,11 @@ impl Splitter {
                                     .range(0.0..=f64::MAX),
                             );
                         });
+                        if let Some(segment) = self.selected.and_then(|index| self.segments.get_mut(index))
+                            && self.start >= 0.0 && self.end > self.start && self.end <= self.duration {
+                                segment.start_ms = (self.start * 1000.0).round() as u64;
+                                segment.end_ms = (self.end * 1000.0).round() as u64;
+                        }
                         ui.horizontal(|ui| {
                             if theme::button(ui, "再生", theme::ButtonKind::Normal).clicked() {
                                 self.run_operation(None);
@@ -268,6 +296,15 @@ impl Splitter {
             return;
         };
         let (start, end) = (self.start, self.end);
+        if !start.is_finite()
+            || !end.is_finite()
+            || start < 0.0
+            || end <= start
+            || end > self.duration
+        {
+            self.error = Some("開始と終了を動画の長さの範囲内で指定してください。".into());
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         self.operation = Some(rx);
         self.error = None;
@@ -286,6 +323,66 @@ impl Splitter {
             let _ = tx.send(result);
         });
     }
+}
+
+fn range_slider(
+    ui: &mut egui::Ui,
+    index: usize,
+    duration: f64,
+    start: &mut f64,
+    end: &mut f64,
+) -> bool {
+    let width = (ui.available_width() - 110.0).max(100.0);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
+    if duration <= 0.0 {
+        return false;
+    }
+    let left = rect.left() + 7.0;
+    let right = rect.right() - 7.0;
+    let x = |t: f64| egui::lerp(left..=right, (t / duration).clamp(0.0, 1.0) as f32);
+    let start_x = x(*start);
+    let end_x = x(*end);
+    let id = ui.id().with(("range_handle", index));
+    let mut changed = false;
+    if let Some(pos) = response.interact_pointer_pos() {
+        if response.drag_started() || response.clicked() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(id, (pos.x - start_x).abs() <= (pos.x - end_x).abs()));
+        }
+        if response.dragged() || response.clicked() {
+            let value = ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * duration;
+            let is_start = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+            if is_start {
+                *start = value.min((*end - 0.001).max(0.0));
+            } else {
+                *end = value.max((*start + 0.001).min(duration));
+            }
+            changed = true;
+        }
+    }
+    let painter = ui.painter();
+    let y = rect.center().y;
+    painter.line_segment(
+        [egui::pos2(left, y), egui::pos2(right, y)],
+        egui::Stroke::new(3.0_f32, theme::state_color(theme::State::Disabled)),
+    );
+    painter.line_segment(
+        [egui::pos2(x(*start), y), egui::pos2(x(*end), y)],
+        egui::Stroke::new(5.0_f32, theme::ACCENT),
+    );
+    for position in [x(*start), x(*end)] {
+        painter.rect_filled(
+            egui::Rect::from_center_size(egui::pos2(position, y), egui::vec2(9.0, 18.0)),
+            egui::CornerRadius::same(2),
+            theme::ACCENT,
+        );
+    }
+    response.on_hover_text(format!(
+        "開始 {:.2} 秒 / 終了 {:.2} 秒。両端をドラッグ",
+        *start, *end
+    ));
+    changed
 }
 
 #[cfg(windows)]
