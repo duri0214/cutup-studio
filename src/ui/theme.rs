@@ -51,7 +51,8 @@ pub const CAPTION_TEXT_SIZE: f32 = 10.0;
 pub const BRAND_TEXT_SIZE: f32 = 25.0;
 pub const BUTTON_TEXT_SIZE: f32 = 12.0;
 pub const TAB_TEXT_SIZE: f32 = 12.0;
-const NEW_ICON_VERTICAL_NUDGE: f32 = 3.0;
+const NEW_ICON_VERTICAL_NUDGE: f32 = 1.0;
+const OPEN_ICON_VERTICAL_NUDGE: f32 = 1.0;
 const NEW_TEXT_VERTICAL_NUDGE: f32 = 1.0;
 const DEMO_LABEL_VERTICAL_NUDGE: f32 = 3.5;
 const DEMO_TOGGLE_VERTICAL_NUDGE: f32 = 0.5;
@@ -736,12 +737,12 @@ pub fn action_button(
     let content_left = response.rect.center().x - content_width * 0.5;
     let center_y = response.rect.center().y;
     // The folder-plus artwork appears top-heavy beside the text at the geometric center.
-    let icon_center_y = center_y
-        + if icon == ActionIcon::New {
-            NEW_ICON_VERTICAL_NUDGE
-        } else {
-            0.0
-        };
+    let icon_vertical_nudge = match icon {
+        ActionIcon::New => NEW_ICON_VERTICAL_NUDGE,
+        ActionIcon::Open => OPEN_ICON_VERTICAL_NUDGE,
+        _ => 0.0,
+    };
+    let icon_center_y = center_y + icon_vertical_nudge;
     paint_action_icon(
         ui,
         icon,
