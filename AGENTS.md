@@ -73,5 +73,7 @@
    - 同じ前提・入力・処理を複数項目で繰り返さず、1回の操作結果を後続の確認で再利用する。別の初期状態や入力経路の確認に必要な再実行だけを残し、各項目の合否条件と受け入れ条件を重複なく網羅する。
    - 実行していない確認を `[x]` にせず、既存の `[x]` を更新時に `[ ]` へ戻さない。
 6. `gh pr create --base <base> --head <current-branch> --title "#<Issue番号> <Issueタイトル>" --body-file <body-file>` で作成し、作成後に URL、assignee、ラベル、Project を確認する。変更依頼に対しては、明示的な `PR不要` 指定がない限り作成または更新まで進める。
+7. PR の作成・更新時に、対応 Issue の assignee と対象リポジトリで利用可能なラベルを `gh pr edit` で PR に追加し、Issue の Project に `gh project item-add` で PR を追加する。既存の PR の設定は尊重し、不要に削除・上書きしない。
+8. 各 Project の PR の Status を確認し、利用可能な選択肢から作業状態に合う値を設定する。作成・更新後に `gh` で assignee、ラベル、Project と Status を確認する。Issue に該当情報がない場合はその旨を報告し、権限不足などで設定・確認できない場合は対象、実行したコマンドと理由を報告する。
 
 git や gh の操作が失敗した場合は、API で迂回せず原因を切り分けて報告する。Project 操作の権限が不足する場合は、`gh auth refresh -s read:project -s project` が必要であることを伝える。
