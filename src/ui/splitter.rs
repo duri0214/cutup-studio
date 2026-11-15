@@ -71,6 +71,9 @@ impl Splitter {
             self.saved = None;
         }
     }
+    pub fn saved_path(&self) -> Option<&std::path::Path> {
+        self.open.then_some(self.saved.as_deref()).flatten()
+    }
     pub fn error(&self) -> Option<&str> {
         self.open.then_some(self.error.as_deref()).flatten()
     }
@@ -276,10 +279,7 @@ impl Splitter {
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 }
-                if let Some(path) = &self.saved {
-                    ui.label(format!("保存先: {}。カタログに反映するには OPEN で基準フォルダを開き直してください。", path.display()));
-                }
-                if let Some(error) = &self.error {
+if let Some(error) = &self.error {
                     theme::state_message(ui, theme::State::Error, error);
                 }
             });
