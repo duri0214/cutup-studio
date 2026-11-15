@@ -647,6 +647,17 @@ fn range_slider(
         .ctx()
         .data(|data| data.get_temp::<Option<bool>>(id))
         .flatten();
+    if response.has_focus() {
+        ui.ctx().memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+    }
     if response.has_focus()
         && let Some(is_start) = selected_handle
         && let Some(delta) = ui.input(|input| {
@@ -1064,6 +1075,7 @@ mod tests {
             selected_handle == Some(true),
             "start handle should be selected"
         );
+        let focus_before_start_adjustment = ctx.memory(|memory| memory.focused());
         let before_arrow = start;
         frame(
             &ctx,
@@ -1081,6 +1093,11 @@ mod tests {
             (start - before_arrow - 0.01).abs() < 1e-9,
             "start changed from {before_arrow} to {start}"
         );
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            focus_before_start_adjustment,
+            "right arrow should adjust the start handle without moving focus"
+        );
 
         let (_, _, end_handle, _, _) = frame(&ctx, vec![], &mut start, &mut end);
         frame(
@@ -1095,6 +1112,7 @@ mod tests {
             selected_handle == Some(false),
             "end handle should be selected"
         );
+        let focus_before_end_adjustment = ctx.memory(|memory| memory.focused());
         let before_end_arrow = end;
         frame(
             &ctx,
@@ -1109,6 +1127,11 @@ mod tests {
             &mut end,
         );
         assert!((end - before_end_arrow + 0.01).abs() < 1e-9);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            focus_before_end_adjustment,
+            "left arrow should adjust the end handle without moving focus"
+        );
     }
 
     #[cfg(windows)]
