@@ -406,7 +406,8 @@ pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
         CONTROL
     };
     let stroke = if selected { ACCENT } else { BORDER };
-    ui.add(
+    ui.add_sized(
+        [FORM_LABEL_WIDTH, 24.0],
         egui::Button::new(
             RichText::new(text)
                 .size(DETAIL_TEXT_SIZE)
@@ -415,7 +416,7 @@ pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
         )
         .fill(fill)
         .stroke(Stroke::new(1.0_f32, stroke))
-        .min_size(Vec2::new(48.0, 24.0)),
+        .truncate(),
     )
     .on_hover_text("この枠の候補を右ペインに表示")
 }
@@ -979,6 +980,24 @@ mod tests {
         );
 
         assert!(clicked);
+    }
+
+    #[test]
+    fn role_labels_have_a_fixed_width_for_aligned_rows() {
+        let context = egui::Context::default();
+        let mut widths = Vec::new();
+        let _ = context.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widths.push(super::role_label(ui, "導入", false).rect.width());
+                widths.push(
+                    super::role_label(ui, "スポーツイベント", false)
+                        .rect
+                        .width(),
+                );
+            });
+        });
+
+        assert_eq!(widths, [super::FORM_LABEL_WIDTH, super::FORM_LABEL_WIDTH]);
     }
 
     #[test]

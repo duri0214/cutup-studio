@@ -736,8 +736,8 @@ impl StudioApp {
                     Some(populated_order - 1)
                 };
                 let label = slot_index.map_or_else(
-                    || guide_input.role.clone(),
-                    |slot_index| format!("{:02} {}", slot_index + 1, guide_input.role),
+                    String::new,
+                    |slot_index| format!("{:02}", slot_index + 1),
                 );
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
@@ -745,7 +745,17 @@ impl StudioApp {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    if theme::role_label(ui, &label, slot_index == self.active_slot).clicked() {
+                    ui.add_sized(
+                        [theme::SPACE_XL, 24.0],
+                        egui::Label::new(theme::detail_muted(label)),
+                    );
+                    if theme::role_label(
+                        ui,
+                        &guide_input.role,
+                        slot_index == self.active_slot,
+                    )
+                    .clicked()
+                    {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
@@ -758,24 +768,24 @@ impl StudioApp {
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
                     }
-                    if !guide_input.query.trim().is_empty() {
-                        let can_search_related = has_model && self.related_task.is_none();
-                        if ui
-                            .add_enabled_ui(can_search_related, |ui| {
-                                theme::icon_button(
-                                    ui,
-                                    theme::ActionIcon::Ollama,
-                                    "このレイヤーの関連素材を探す",
-                                    theme::ButtonKind::Normal,
-                                )
-                            })
-                            .inner
-                            .clicked()
-                        {
-                            related_input = Some(index);
-                            focused_guide = Some(index);
-                            self.active_section = Section::Guide;
-                        }
+                    let can_search_related = has_model
+                        && !guide_input.query.trim().is_empty()
+                        && self.related_task.is_none();
+                    if ui
+                        .add_enabled_ui(can_search_related, |ui| {
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Ollama,
+                                "このレイヤーの関連素材を探す",
+                                theme::ButtonKind::Normal,
+                            )
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        related_input = Some(index);
+                        focused_guide = Some(index);
+                        self.active_section = Section::Guide;
                     }
                     if can_remove
                         && theme::icon_button(
