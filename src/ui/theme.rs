@@ -731,10 +731,12 @@ pub fn action_button(
     let response = ui.add_sized(size, button);
     let content_left = response.rect.center().x - content_width * 0.5;
     let center_y = response.rect.center().y;
+    // The folder-plus artwork appears top-heavy beside the text at the geometric center.
+    let icon_center_y = center_y + if icon == ActionIcon::New { 1.5 } else { 0.0 };
     paint_action_icon(
         ui,
         icon,
-        Pos2::new(content_left + icon_size.x * 0.5, center_y),
+        Pos2::new(content_left + icon_size.x * 0.5, icon_center_y),
         icon_size,
         text_color,
     );
