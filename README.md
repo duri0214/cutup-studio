@@ -74,6 +74,8 @@ cargo run
 
 [ローカル AI のセットアップ](src/infra/local_ai/README.md)に従い FFmpeg と whisper.cpp を用意します。YouTube を使う場合は [yt-dlp の公式配布](https://github.com/yt-dlp/yt-dlp#installation)から導入し、`yt-dlp --version` が実行できるよう PATH を設定します。YouTube の取得には yt-dlp 対応の JavaScript 実行環境が別途必要な場合があります。既定以外の場所に置いた場合は、カタログを開き、素材の「設定」で Whisper の実行ファイルとモデルを指定します。音声の言語も同じ設定を使います。
 
+Windows では `winget install --id yt-dlp.yt-dlp --exact --scope user` でも導入できます。インストール後はターミナルとアプリを再起動してください。切り出し画面の信号は各ファイルの検出状態を示し、実際に解析できることまでは保証しません。yt-dlp は YouTube URL の場合に必要です。
+
 01 の「動画から素材を切り出す」で「YouTube の動画 URL」に動画ページの URL を入力し、「台詞を解析」を押します。音声を一時フォルダに取得し、解析と試聴に使います。一覧の台詞を選んで開始・終了の秒数を調整し、「再生」で確認して「WAVに保存」で保存先を選びます。「動画を選ぶ」から手元のファイルも使えます。既存カタログに登録するには基準フォルダの `materials/` に保存し、OPEN で開き直してください。文字起こしの時刻は目安です。再生には Windows では PowerShell、その他の環境では FFmpeg に付属する ffplay が必要です。配信元の動画は変更しません。
 
 ## 開発

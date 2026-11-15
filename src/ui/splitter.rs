@@ -1,4 +1,7 @@
-use super::{catalog_editor::EditorSettings, theme};
+use super::{
+    catalog_editor::{EditorSettings, executable_exists},
+    theme,
+};
 use crate::{
     domain::valueobject::catalog::AnalysisCandidate,
     infra::{
@@ -84,6 +87,24 @@ impl Splitter {
             .resizable(true)
             .show(ctx, |ui| {
                 let busy = self.task.is_some() || self.operation.is_some();
+                ui.label("必要なツール（ファイルの有無）");
+                ui.horizontal_wrapped(|ui| {
+                    for (name, present) in [
+                        ("FFmpeg", executable_exists("ffmpeg")),
+                        ("Whisper", executable_exists(&settings.whisper_path)),
+                        ("モデル", std::path::Path::new(&settings.model_path).is_file()),
+                        ("yt-dlp（URL用）", executable_exists("yt-dlp")),
+                    ] {
+                        ui.horizontal(|ui| {
+                            theme::traffic_light(ui, if present { theme::State::Ready } else { theme::State::Attention });
+                            ui.vertical(|ui| {
+                                ui.label(name);
+                                ui.label(if present { "検出" } else { "未検出" });
+                            });
+                        });
+                    }
+                });
+                ui.label("Whisper とモデルは素材の「設定」で指定できます。PATH 変更後はアプリを再起動してください。");
                 ui.add_enabled_ui(!busy, |ui| {
                     ui.label("YouTube の動画 URL");
                     ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
