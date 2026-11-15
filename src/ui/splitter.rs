@@ -156,10 +156,13 @@ impl Splitter {
                             self.set_source(InputSource::Local);
                         }
                     });
+                    let mut submit_url = false;
                     match self.source {
                         InputSource::Youtube => {
                             let width = ui.available_width().max(120.0);
-                            if theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width).changed() {
+                            let response = theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width);
+                            submit_url = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) && !self.url.trim().is_empty();
+                            if response.changed() {
                                 self.input = None;
                                 self.downloaded = None;
                                 self.segments.clear();
@@ -188,7 +191,7 @@ impl Splitter {
                             self.input.is_some() || !self.url.trim().is_empty(),
                             egui::Button::new("音声を抽出・文字起こし"),
                         )
-                        .clicked()
+                        .clicked() || submit_url
                     {
                         let local_input = self.input.clone();
                         let url = self.url.trim().to_owned();
