@@ -409,7 +409,7 @@ fn range_slider(
     start: &mut f64,
     end: &mut f64,
 ) -> bool {
-    let width = (ui.available_width() - 90.0).max(20.0);
+    let width = (ui.available_width() - 106.0).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
@@ -594,7 +594,7 @@ mod tests {
                             ui.horizontal(|ui| {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
                                 let left = ui.next_widget_position();
-                                let width = (ui.available_width() - 90.0).max(20.0);
+                                let width = (ui.available_width() - 106.0).max(20.0);
                                 handle = egui::pos2(
                                     left.x + 7.0 + (width - 14.0) * (*start as f32 / 100.0),
                                     left.y + 14.0,
