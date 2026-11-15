@@ -1362,12 +1362,32 @@ fn active_slot_for_input(inputs: &[GuideInput], index: usize) -> Option<usize> {
 }
 
 fn demo_material_root() -> PathBuf {
+    let executable = std::env::current_exe().ok();
+    demo_material_root_for(executable.as_deref())
+}
+
+fn demo_material_root_for(executable: Option<&std::path::Path>) -> PathBuf {
+    if let Some(demo) = executable
+        .and_then(|path| path.parent())
+        .map(|path| path.join("demo"))
+        && demo.is_dir()
+    {
+        return demo;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_uses_folder_next_to_distributed_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("demo")).unwrap();
+        let exe = dir.path().join("cutup-studio.exe");
+        assert_eq!(demo_material_root_for(Some(&exe)), dir.path().join("demo"));
+    }
 
     #[test]
     fn export_uses_current_selection_without_loading_or_saving_recipe() {
