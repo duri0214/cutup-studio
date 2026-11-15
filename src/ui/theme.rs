@@ -697,6 +697,14 @@ pub fn action_button(
 }
 
 pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
+    styled_button(ui, label, kind, None)
+}
+
+pub fn button_sized(ui: &mut Ui, label: &str, kind: ButtonKind, size: Vec2) -> Response {
+    styled_button(ui, label, kind, Some(size))
+}
+
+fn styled_button(ui: &mut Ui, label: &str, kind: ButtonKind, size: Option<Vec2>) -> Response {
     let enabled = ui.is_enabled();
     let mut button = egui::Button::new(
         RichText::new(label)
@@ -713,7 +721,11 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
                 .stroke(Stroke::new(1.0_f32, RED.gamma_multiply(0.5))),
         };
     }
-    ui.add(button)
+    if let Some(size) = size {
+        ui.add_sized(size, button)
+    } else {
+        ui.add(button)
+    }
 }
 
 fn button_text_color(kind: ButtonKind, enabled: bool) -> Color32 {

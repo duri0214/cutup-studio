@@ -609,7 +609,7 @@ impl StudioApp {
                     }
                     if ui
                         .add_enabled_ui(self.catalog.is_some(), |ui| {
-                            theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal)
+                            theme::button_sized(ui, "動画から素材を切り出す", theme::ButtonKind::Normal, Vec2::new(200.0, 32.0))
                         })
                         .inner
                         .clicked()
@@ -627,7 +627,7 @@ impl StudioApp {
                         .is_some_and(|editor| editor.count() > 0 && !editor.open);
                     if ui
                         .add_enabled_ui(can_open_editor, |ui| {
-                            theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
+                            theme::button_sized(ui, "素材の情報を登録", theme::ButtonKind::Primary, Vec2::new(200.0, 32.0))
                         })
                         .inner
                         .clicked()
