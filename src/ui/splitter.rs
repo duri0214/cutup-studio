@@ -21,9 +21,17 @@ use std::{
 type AnalysisTask =
     Receiver<Result<(Vec<AnalysisCandidate>, Option<tempfile::TempDir>, PathBuf), String>>;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum InputSource {
+    #[default]
+    Youtube,
+    Local,
+}
+
 #[derive(Default)]
 pub(super) struct Splitter {
     pub open: bool,
+    source: InputSource,
     input: Option<PathBuf>,
     url: String,
     downloaded: Option<tempfile::TempDir>,
@@ -37,6 +45,17 @@ pub(super) struct Splitter {
 }
 
 impl Splitter {
+    fn set_source(&mut self, source: InputSource) {
+        if self.source != source {
+            self.source = source;
+            self.input = None;
+            self.url.clear();
+            self.downloaded = None;
+            self.segments.clear();
+            self.selected = None;
+            self.error = None;
+        }
+    }
     pub fn error(&self) -> Option<&str> {
         self.open.then_some(self.error.as_deref()).flatten()
     }
@@ -103,32 +122,40 @@ impl Splitter {
                 });
                 ui.label("Whisper とモデルは素材の「設定」で指定できます。PATH 変更後はアプリを再起動してください。");
                 ui.add_enabled_ui(!busy, |ui| {
-                    ui.label("YouTube の動画 URL");
-                    ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
-                    ui.horizontal_wrapped(|ui| {
-                        let width = (ui.available_width() - 200.0).max(120.0);
-                        if theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width).changed() {
-                            self.input = None;
-                            self.downloaded = None;
-                            self.segments.clear();
-                            self.selected = None;
-                            self.error = None;
+                    ui.label("動画の入力元");
+                    ui.horizontal(|ui| {
+                        if ui.radio(self.source == InputSource::Youtube, "YouTube URL").clicked() {
+                            self.set_source(InputSource::Youtube);
                         }
-                        if theme::button(ui, "ローカル動画を選ぶ", theme::ButtonKind::Normal).clicked()
-                            && let Some(path) = rfd::FileDialog::new().pick_file()
-                        {
-                            self.input = Some(path);
-                            self.url.clear();
-                            self.downloaded = None;
-                            self.segments.clear();
-                            self.selected = None;
-                            self.error = None;
+                        if ui.radio(self.source == InputSource::Local, "ローカル動画").clicked() {
+                            self.set_source(InputSource::Local);
                         }
                     });
-                    if let Some(path) = &self.input
-                        && self.url.is_empty()
-                    {
-                        ui.label(path.display().to_string());
+                    match self.source {
+                        InputSource::Youtube => {
+                            ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
+                            let width = ui.available_width().max(120.0);
+                            if theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width).changed() {
+                                self.input = None;
+                                self.downloaded = None;
+                                self.segments.clear();
+                                self.selected = None;
+                                self.error = None;
+                            }
+                        }
+                        InputSource::Local => {
+                            if theme::button(ui, "ファイルを選ぶ", theme::ButtonKind::Normal).clicked()
+                                && let Some(path) = rfd::FileDialog::new().pick_file()
+                            {
+                                self.input = Some(path);
+                                self.segments.clear();
+                                self.selected = None;
+                                self.error = None;
+                            }
+                            if let Some(path) = &self.input {
+                                ui.label(path.display().to_string());
+                            }
+                        }
                     }
                     if ui
                         .add_enabled(
@@ -280,8 +307,31 @@ fn play(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
+    #[test]
+    fn changing_source_discards_the_previous_selection() {
+        let mut splitter = super::Splitter {
+            url: "https://youtu.be/jNQXAC9IVRw".into(),
+            input: Some("input.wav".into()),
+            selected: Some(0),
+            ..Default::default()
+        };
+        splitter.set_source(super::InputSource::Local);
+        assert!(splitter.url.is_empty());
+        assert!(splitter.input.is_none());
+        assert!(splitter.selected.is_none());
+        splitter.input = Some("local.wav".into());
+        splitter.set_source(super::InputSource::Local);
+        assert_eq!(
+            splitter.input.as_deref(),
+            Some(std::path::Path::new("local.wav"))
+        );
+        splitter.set_source(super::InputSource::Youtube);
+        assert!(splitter.input.is_none());
+    }
+
+    #[cfg(windows)]
     #[test]
     #[ignore = "requires a working Windows audio device"]
     fn preview_plays_a_wave_file() {
