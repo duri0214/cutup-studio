@@ -45,6 +45,7 @@ pub(super) struct Splitter {
     url: String,
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
+    results_generation: u64,
     duration: f64,
     selected: Option<usize>,
     start: f64,
@@ -82,6 +83,7 @@ impl Splitter {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input, duration))) => {
                     self.segments = valid_segments(segments, duration);
+                    self.results_generation = self.results_generation.wrapping_add(1);
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -242,7 +244,7 @@ impl Splitter {
                             self.save_all(root.to_owned());
                         }
                         let mut action = None;
-                        egui::ScrollArea::vertical().id_salt("splitter_segments_scroll").max_height(180.0).show(ui, |ui| {
+                        egui::ScrollArea::vertical().id_salt(("splitter_segments_scroll", self.results_generation)).max_height(180.0).show(ui, |ui| {
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
                                     let short: String = segment.text.chars().take(10).collect();
