@@ -62,6 +62,9 @@ pub enum ActionIcon {
     Delete,
     Close,
     Ollama,
+    Play,
+    Save,
+    RestoreSize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +207,31 @@ pub fn section_title(text: impl Into<String>) -> RichText {
     body(text).strong().color(TEXT)
 }
 
+pub fn pane_title(ui: &mut Ui, text: &str) {
+    let font = FontId::proportional(TAB_TEXT_SIZE);
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), ACCENT)
+        .size()
+        .x;
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(text_width + SPACE_LG * 2.0, INPUT_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter().text(
+        Pos2::new(rect.left() + SPACE_LG, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        font,
+        ACCENT,
+    );
+    let y = rect.bottom() - 1.0;
+    ui.painter().line_segment(
+        [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+        Stroke::new(2.0_f32, ACCENT),
+    );
+}
+
 pub fn item_title(text: impl Into<String>) -> RichText {
     body(text).strong()
 }
@@ -278,8 +306,53 @@ pub fn state_message(ui: &mut Ui, state: State, text: &str) {
     ui.label(detail(text).color(state_color(state)));
 }
 
-pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
+pub fn progress_message(ui: &mut Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new().size(16.0).color(ACCENT));
+        ui.label(body(text));
+    });
+}
+
+fn error_animation_start(
+    previous: Option<(State, String, u64, f64)>,
+    active: State,
+    detail: &str,
+    attempt: u64,
+    now: f64,
+) -> f64 {
+    match previous {
+        Some((state, old_detail, old_attempt, _))
+            if active == State::Error
+                && (state != active || old_detail != detail || old_attempt != attempt) =>
+        {
+            now
+        }
+        Some((_, _, _, started)) => started,
+        None if active == State::Error => now,
+        None => -1.0,
+    }
+}
+
+pub fn traffic_light(ui: &mut Ui, active: State, detail: &str, attempt: u64) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
+    let id = ui.id().with("traffic_light_animation");
+    let now = ui.input(|input| input.time);
+    let previous = ui
+        .ctx()
+        .data(|data| data.get_temp::<(State, String, u64, f64)>(id));
+    let started = error_animation_start(previous, active, detail, attempt, now);
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(id, (active, detail.to_owned(), attempt, started)));
+    let elapsed = (now - started) as f32;
+    let animating = active == State::Error && (0.0..0.55).contains(&elapsed);
+    let offset = if animating {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
+        (elapsed * 45.0).sin() * 4.0 * (1.0 - elapsed / 0.55)
+    } else {
+        0.0
+    };
+    let rect = rect.translate(Vec2::new(offset, 0.0));
     ui.painter()
         .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), TRAFFIC_BACKGROUND);
     ui.painter().rect_stroke(
@@ -294,13 +367,29 @@ pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
         (State::Ready, 30.0),
     ] {
         let color = if state == active {
-            state_color(state)
+            if state == State::Error && animating && elapsed < 0.18 {
+                let mix = (elapsed / 0.18).clamp(0.0, 1.0);
+                Color32::from_rgb(
+                    (255.0 + (f32::from(RED.r()) - 255.0) * mix) as u8,
+                    (255.0 + (f32::from(RED.g()) - 255.0) * mix) as u8,
+                    (255.0 + (f32::from(RED.b()) - 255.0) * mix) as u8,
+                )
+            } else {
+                state_color(state)
+            }
         } else {
             state_color(state).gamma_multiply(0.18)
         };
         ui.painter()
             .circle_filled(Pos2::new(rect.center().x, rect.top() + offset), 3.5, color);
     }
+    response
+}
+
+pub fn availability_indicator(ui: &mut Ui, available: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+    ui.painter()
+        .circle_filled(rect.center(), 5.0, if available { ACCENT } else { RED });
     response
 }
 
@@ -637,6 +726,14 @@ pub fn action_button(
 }
 
 pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
+    styled_button(ui, label, kind, None)
+}
+
+pub fn button_sized(ui: &mut Ui, label: &str, kind: ButtonKind, size: Vec2) -> Response {
+    styled_button(ui, label, kind, Some(size))
+}
+
+fn styled_button(ui: &mut Ui, label: &str, kind: ButtonKind, size: Option<Vec2>) -> Response {
     let enabled = ui.is_enabled();
     let mut button = egui::Button::new(
         RichText::new(label)
@@ -653,7 +750,11 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
                 .stroke(Stroke::new(1.0_f32, RED.gamma_multiply(0.5))),
         };
     }
-    ui.add(button)
+    if let Some(size) = size {
+        ui.add_sized(size, button)
+    } else {
+        ui.add(button)
+    }
 }
 
 fn button_text_color(kind: ButtonKind, enabled: bool) -> Color32 {
@@ -749,6 +850,15 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         ActionIcon::Close => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/x.svg"))
         }
+        ActionIcon::Play => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/play.svg"))
+        }
+        ActionIcon::Save => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/save.svg"))
+        }
+        ActionIcon::RestoreSize => egui::Image::new(egui::include_image!(
+            "../../assets/icons/lucide/restore-size.svg"
+        )),
         ActionIcon::Ollama => egui::Image::new(egui::include_image!(
             "../../assets/icons/ollama/ollama-logo.svg"
         )),
@@ -757,6 +867,23 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repeated_error_animates_only_when_a_new_attempt_occurs() {
+        use super::{State, error_animation_start};
+        let previous = Some((State::Error, "古い形式".to_owned(), 1, 10.0));
+        assert_eq!(
+            error_animation_start(previous.clone(), State::Error, "古い形式", 1, 20.0),
+            10.0
+        );
+        assert_eq!(
+            error_animation_start(previous, State::Error, "古い形式", 2, 20.0),
+            20.0
+        );
+        assert_eq!(
+            error_animation_start(None, State::Attention, "未設定", 0, 20.0),
+            -1.0
+        );
+    }
     use eframe::egui;
 
     #[test]

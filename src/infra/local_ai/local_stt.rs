@@ -79,6 +79,25 @@ pub fn transcribe(
     expected_fingerprint: &str,
     cancel: &AtomicBool,
 ) -> Result<Vec<AnalysisCandidate>, SttError> {
+    transcribe_with_granularity(config, input, expected_fingerprint, cancel, false)
+}
+
+pub fn transcribe_for_splitting(
+    config: &SttConfig,
+    input: &Path,
+    expected_fingerprint: &str,
+    cancel: &AtomicBool,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
+    transcribe_with_granularity(config, input, expected_fingerprint, cancel, true)
+}
+
+fn transcribe_with_granularity(
+    config: &SttConfig,
+    input: &Path,
+    expected_fingerprint: &str,
+    cancel: &AtomicBool,
+    short_segments: bool,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
     if fingerprint(input, cancel)? != expected_fingerprint {
         return Err(SttError::MaterialChanged);
     }
@@ -123,18 +142,27 @@ pub fn transcribe(
         .arg(&audio)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if short_segments {
+        whisper.args(["-ml", "15"]);
+    }
     run(&mut whisper, "whisper-cli", cancel)?;
     if fingerprint(input, cancel)? != expected_fingerprint {
         return Err(SttError::MaterialChanged);
     }
-    parse_transcript(
+    let result = parse_transcript(
         &fs::read(output.with_extension("json"))?,
         model_name,
         &version,
-    )
+    );
+    match result {
+        Err(SttError::Json(_)) if short_segments => {
+            transcribe_with_granularity(config, input, expected_fingerprint, cancel, false)
+        }
+        other => other,
+    }
 }
 
-fn fingerprint(path: &Path, cancel: &AtomicBool) -> Result<String, SttError> {
+pub fn fingerprint(path: &Path, cancel: &AtomicBool) -> Result<String, SttError> {
     let mut file = fs::File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 65536];
@@ -210,6 +238,27 @@ fn parse_transcript(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires local ffmpeg, whisper-cli, a model and CUTUP_TEST_INPUT"]
+    fn splitter_transcribes_input_with_invalid_short_segment_utf8() {
+        let input = PathBuf::from(std::env::var_os("CUTUP_TEST_INPUT").unwrap());
+        let config = SttConfig {
+            ffmpeg: "ffmpeg".into(),
+            whisper: std::env::var_os("CUTUP_TEST_WHISPER").unwrap().into(),
+            model: std::env::var_os("CUTUP_TEST_MODEL").unwrap().into(),
+            language: SpeechLanguage::Auto,
+        };
+        let cancel = AtomicBool::new(false);
+        let hash = fingerprint(&input, &cancel).unwrap();
+        let result = transcribe_for_splitting(&config, &input, &hash, &cancel).unwrap();
+        assert!(!result.is_empty());
+        assert!(
+            result
+                .iter()
+                .all(|segment| !segment.text.contains('\u{fffd}'))
+        );
+    }
+
     #[test]
     fn missing_ffmpeg_reports_which_tool_needs_installation() {
         let temp = tempfile::tempdir().unwrap();

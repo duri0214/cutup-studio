@@ -51,13 +51,16 @@ impl SqliteCatalog {
         if !root.is_dir() {
             return Err(CatalogError::InvalidPath);
         }
-        materials_directory(&root)?;
         let root_text = root.to_str().ok_or(CatalogError::InvalidPath)?;
         let reservation = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)?;
         drop(reservation);
+        if let Err(error) = fs::create_dir_all(root.join("materials")) {
+            let _ = fs::remove_file(path);
+            return Err(error.into());
+        }
         let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&connection)?;
         let tx = connection.transaction()?;
@@ -485,6 +488,44 @@ fn refresh_search(connection: &Connection, id: i64) -> Result<(), CatalogError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_an_old_catalog_repeatedly_rejects_it_without_modifying_the_file() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("materials")).unwrap();
+        let path = temp.path().join("material-catalog.sqlite");
+        fs::write(&path, []).unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                SqliteCatalog::open(&path),
+                Err(CatalogError::UnsupportedSchema)
+            ));
+            assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        }
+    }
+
+    #[test]
+    fn create_initializes_missing_materials_and_preserves_existing_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("material-catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, temp.path()).unwrap();
+        assert!(temp.path().join("materials").is_dir());
+        assert_eq!(store.rescan().unwrap().added, 0);
+        drop(store);
+        assert!(SqliteCatalog::create(&path, temp.path()).is_err());
+        assert!(SqliteCatalog::open(&path).is_ok());
+    }
+
+    #[test]
+    fn create_rejects_file_named_materials_without_leaving_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("materials"), b"keep").unwrap();
+        let path = temp.path().join("material-catalog.sqlite");
+        assert!(SqliteCatalog::create(&path, temp.path()).is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(temp.path().join("materials")).unwrap(), b"keep");
+    }
 
     #[test]
     fn version_three_catalog_migrates_without_losing_materials() {

@@ -37,11 +37,11 @@ type AnalysisTask = Receiver<(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct EditorSettings {
-    whisper_path: String,
-    model_path: String,
+    pub(super) whisper_path: String,
+    pub(super) model_path: String,
     ollama_model: String,
     speech_recognition: bool,
-    speech_language: SpeechLanguage,
+    pub(super) speech_language: SpeechLanguage,
 }
 
 impl Default for EditorSettings {
@@ -175,7 +175,7 @@ impl CatalogEditor {
         let mut event = PanelEvent::None;
         theme::panel().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(theme::section_title("素材の情報を登録"));
+                theme::pane_title(ui, "素材の情報を登録");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled_ui(self.analysis_task.is_none(), |ui| {
@@ -570,10 +570,7 @@ impl CatalogEditor {
             }
         }
         if self.analysis_task.is_some() {
-            ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(16.0).color(theme::ACCENT));
-                ui.label(theme::body("音声から情報を抽出中…"));
-            });
+            theme::progress_message(ui, "音声から情報を抽出中…");
             ui.label(theme::detail_muted(
                 "Ollama 実行中の中断は応答を待って反映されます。",
             ));
@@ -1091,6 +1088,11 @@ impl CatalogEditor {
         self.refresh()?;
         self.load_selected();
         Ok(())
+    }
+
+    pub(super) fn rescan(&mut self) -> Result<(), CatalogError> {
+        self.store.rescan()?;
+        self.refresh()
     }
 
     fn refresh(&mut self) -> Result<(), CatalogError> {

@@ -45,12 +45,14 @@ struct GuideInput {
 }
 
 pub struct StudioApp {
+    splitter: super::splitter::Splitter,
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
     demo_mode: bool,
     editor: Option<CatalogEditor>,
     editor_settings: EditorSettings,
     catalog_task: Option<CatalogTask>,
+    catalog_attempt: u64,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
     selections: BTreeMap<String, Candidate>,
@@ -74,12 +76,14 @@ impl StudioApp {
             .and_then(|storage| eframe::get_value(storage, "editor_settings"))
             .unwrap_or_default();
         Self {
+            splitter: super::splitter::Splitter::default(),
             catalog: None,
             catalog_path: None,
             demo_mode: false,
             editor: None,
             editor_settings,
             catalog_task: None,
+            catalog_attempt: 0,
             guide_inputs: Vec::new(),
             plan: None,
             selections: BTreeMap::new(),
@@ -103,6 +107,7 @@ impl StudioApp {
         else {
             return;
         };
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => self.start_catalog_task(path, None, context),
@@ -121,6 +126,9 @@ impl StudioApp {
     }
 
     fn clear_active_catalog(&mut self) {
+        if !self.splitter.is_busy() {
+            self.splitter = super::splitter::Splitter::default();
+        }
         if let Some(editor) = &self.editor {
             self.editor_settings = editor.settings();
         }
@@ -137,6 +145,7 @@ impl StudioApp {
     }
 
     fn use_demo_catalog(&mut self, context: &egui::Context) {
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let root = demo_material_root();
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
@@ -157,11 +166,12 @@ impl StudioApp {
 
     fn create_catalog(&mut self, context: &egui::Context) {
         let Some(root) = rfd::FileDialog::new()
-            .set_title("基準フォルダを選択（materials フォルダが必要）")
+            .set_title("基準フォルダを選択")
             .pick_folder()
         else {
             return;
         };
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => {
@@ -227,7 +237,7 @@ impl StudioApp {
         }) {
             Ok((mut editor, path, report)) => {
                 let total = editor.count();
-                editor.open = total > 0;
+                editor.open = false;
                 self.active_section = Section::Catalog;
                 self.editor = Some(editor);
                 self.catalog_path = Some(path);
@@ -464,6 +474,9 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
+        if self.active_section == Section::Catalog && self.splitter.error().is_some() {
+            return (theme::State::Error, "ERROR");
+        }
         if self.status.starts_with("RELATED ERROR")
             || self.status.starts_with("EXPORT ERROR")
             || self.status.starts_with("CATALOG ERROR")
@@ -512,6 +525,21 @@ impl StudioApp {
             ui.label(theme::brand_primary("CUTUP"));
             ui.label(theme::brand_secondary("STUDIO"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_button(
+                    ui,
+                    theme::ActionIcon::RestoreSize,
+                    "ウィンドウサイズを戻す",
+                    theme::ButtonKind::Normal,
+                )
+                .clicked()
+                {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                            1280.0, 820.0,
+                        )));
+                }
                 if self.is_demo_catalog() && signal != theme::State::Error {
                     theme::ready_badge(ui, "DEMO");
                 }
@@ -520,6 +548,14 @@ impl StudioApp {
         ui.label(theme::body_muted(
             "基準フォルダ内の素材から、構成の指示書を作る。",
         ));
+    }
+
+    fn show_splitter(&mut self) {
+        if let Some(editor) = &mut self.editor {
+            editor.open = false;
+        }
+        self.splitter.open = true;
+        self.active_section = Section::Catalog;
     }
 
     fn show_catalog_controls(&mut self, ui: &mut Ui) {
@@ -534,78 +570,93 @@ impl StudioApp {
             .clicked()
             {
                 self.active_section = Section::Catalog;
-                if let Some(editor) = &mut self.editor {
-                    editor.open = true;
-                }
             }
-            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
+            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status, self.catalog_attempt);
             ui.label(theme::detail_muted(
-                "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
+                "NEW で基準フォルダに materials/ とカタログを作成します。",
             ));
             ui.add_space(theme::SPACE_XS);
-            ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
-                ui.horizontal(|ui| {
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::New,
-                        "NEW",
-                        theme::ButtonKind::Normal,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.create_catalog(ui.ctx());
-                    }
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::Open,
-                        "OPEN",
-                        theme::ButtonKind::Normal,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.open_catalog(ui.ctx());
-                    }
-                    if theme::toggle_button(
-                        ui,
-                        "DEMO",
-                        self.is_demo_catalog(),
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        if self.is_demo_catalog() {
-                            self.clear_active_catalog();
-                            self.catalog_task = None;
-                            self.status =
-                                "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
-                                    .into();
-                        } else {
-                            self.use_demo_catalog(ui.ctx());
+            ui.add_enabled_ui(
+                self.catalog_task.is_none() && !self.splitter.is_busy(),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::New,
+                            "NEW",
+                            theme::ButtonKind::Normal,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.create_catalog(ui.ctx());
                         }
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Open,
+                            "OPEN",
+                            theme::ButtonKind::Normal,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.open_catalog(ui.ctx());
+                        }
+                        if theme::toggle_button(
+                            ui,
+                            "DEMO",
+                            self.is_demo_catalog(),
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            if self.is_demo_catalog() {
+                                self.clear_active_catalog();
+                                self.catalog_task = None;
+                                self.status =
+                                    "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
+                                        .into();
+                            } else {
+                                self.use_demo_catalog(ui.ctx());
+                            }
+                        }
+                    });
+                    if self.catalog.is_none() {
+                        ui.label(theme::detail_muted(
+                            "素材を切り出すには、先に NEW または OPEN で基準フォルダを選んでください。",
+                        ));
                     }
-                });
-                if let Some(editor) = &mut self.editor {
-                    let total = editor.count();
-                    ui.label(theme::body(format!("素材ファイル: {total} 件")));
-                }
-                let can_open_editor = self
-                    .editor
-                    .as_ref()
-                    .is_some_and(|editor| editor.count() > 0 && !editor.open);
-                if ui
-                    .add_enabled_ui(can_open_editor, |ui| {
-                        theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
-                    })
-                    .inner
-                    .clicked()
-                    && let Some(editor) = &mut self.editor
-                {
-                    editor.open = true;
-                    self.active_section = Section::Catalog;
-                }
-            });
+                    if ui
+                        .add_enabled_ui(self.catalog.is_some(), |ui| {
+                            theme::button_sized(ui, "動画から素材を切り出す", theme::ButtonKind::Normal, Vec2::new(200.0, 32.0))
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        self.show_splitter();
+                    }
+                    if let Some(editor) = &mut self.editor {
+                        let total = editor.count();
+                        ui.label(theme::body(format!("素材ファイル: {total} 件")));
+                    }
+                    let can_open_editor = self
+                        .editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.count() > 0);
+                    if ui
+                        .add_enabled_ui(can_open_editor, |ui| {
+                            theme::button_sized(ui, "素材の情報を登録", theme::ButtonKind::Primary, Vec2::new(200.0, 32.0))
+                        })
+                        .inner
+                        .clicked()
+                        && let Some(editor) = &mut self.editor
+                    {
+                        editor.open = true;
+                        self.active_section = Section::Catalog;
+                        self.splitter.open = false;
+                    }
+                },
+            );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(theme::caption_text(format!(
@@ -637,7 +688,7 @@ impl StudioApp {
             if theme::section_tab(ui, "02 の候補を表示", self.active_section == Section::Guide, 150.0).clicked() {
                 self.active_section = Section::Guide;
             }
-            section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
+            section_header(ui, "02 / COMPOSITION GUIDE", signal, status, 0);
             if self.status.starts_with("RELATED ERROR") {
                 theme::state_message(ui, theme::State::Error, &self.status);
             }
@@ -777,19 +828,19 @@ impl StudioApp {
 
     fn show_candidate_pane(&mut self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
-            section_header(
-                ui,
-                "02 / CANDIDATES",
-                theme::State::Ready,
-                "02 / COMPOSITION GUIDE の候補",
-            );
+            ui.horizontal(|ui| {
+                theme::pane_title(ui, "02 / CANDIDATES");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    theme::traffic_light(ui, theme::State::Ready, "02 / COMPOSITION GUIDE", 0);
+                });
+            });
             self.show_candidates(ui);
         });
     }
 
     fn show_info_pane(&self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "INFO PANE");
+            theme::pane_title(ui, "INFO PANE");
             ui.add_space(theme::SPACE_SM);
             ui.label(theme::body_muted(
                 "素材の登録と、02 / COMPOSITION GUIDE の候補を表示します。",
@@ -1074,6 +1125,23 @@ impl eframe::App for StudioApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        let settings = self
+            .editor
+            .as_ref()
+            .map(CatalogEditor::settings)
+            .unwrap_or_else(|| self.editor_settings.clone());
+        self.splitter.poll(context);
+        if self.splitter.take_rescan_pending()
+            && let Some(editor) = &mut self.editor
+        {
+            match editor.rescan() {
+                Ok(()) => self.reload_catalog(),
+                Err(error) => {
+                    self.splitter.rescan_failed();
+                    self.status = format!("CATALOG ERROR: {error}");
+                }
+            }
+        }
         if context.input(|input| input.viewport().close_requested()) {
             let metadata_dirty = self
                 .editor
@@ -1217,7 +1285,28 @@ impl eframe::App for StudioApp {
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
-                if let Some((state, message)) = self
+                if let Some(error) = self
+                    .splitter
+                    .error()
+                    .filter(|_| self.active_section == Section::Catalog)
+                {
+                    theme::state_message(ui, theme::State::Error, error);
+                } else if let Some(path) = self
+                    .splitter
+                    .saved_path()
+                    .filter(|_| self.active_section == Section::Catalog)
+                {
+                    ui.label(theme::status_text(format!(
+                        "保存先: {}。素材をカタログに反映しました。",
+                        path.display()
+                    )));
+                } else if let Some(count) = self
+                    .splitter
+                    .result_count()
+                    .filter(|_| self.active_section == Section::Catalog)
+                {
+                    ui.label(theme::status_text(format!("文字起こし完了 — {count} 件")));
+                } else if let Some((state, message)) = self
                     .editor
                     .as_ref()
                     .filter(|editor| editor.open && self.active_section == Section::Catalog)
@@ -1235,7 +1324,16 @@ impl eframe::App for StudioApp {
             .frame(theme::content_frame())
             .show(context, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.active_section == Section::Catalog && registering {
+                    if self.active_section == Section::Catalog
+                        && self.splitter.open
+                        && let Some(catalog) = &self.catalog
+                    {
+                        self.splitter.show(
+                            ui,
+                            &settings,
+                            std::path::Path::new(&catalog.material_root),
+                        );
+                    } else if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =
                                 editor.message().map(|(_, text)| text.to_owned());
@@ -1249,7 +1347,7 @@ impl eframe::App for StudioApp {
                         self.show_candidate_pane(ui);
                     } else if self.active_section == Section::Composition {
                         theme::panel().show(ui, |ui| {
-                            ui.label(theme::section_title("03 / COMPOSITION"));
+                            theme::pane_title(ui, "03 / COMPOSITION");
                             ui.label(theme::body(
                                 "構成の保存・読み込みと書き出しは左の 03 で操作します。",
                             ));
@@ -1329,12 +1427,14 @@ fn same_composition(a: Option<&CompositionRecipe>, b: Option<&CompositionRecipe>
     }
 }
 
-fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
+fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str, attempt: u64) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
         ui.label(theme::section_title(title));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            theme::traffic_light(ui, signal).on_hover_text(detail);
+            ui.push_id(title, |ui| {
+                theme::traffic_light(ui, signal, detail, attempt).on_hover_text(detail)
+            });
         });
     });
 }
@@ -1382,6 +1482,118 @@ mod tests {
     use super::*;
 
     #[test]
+    fn splitter_button_switches_from_guide_and_keeps_editor_available() {
+        use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Shape};
+        fn find_label(shape: &Shape, label: &str) -> Option<Pos2> {
+            match shape {
+                Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                Shape::Vec(shapes) => shapes.iter().find_map(|shape| find_label(shape, label)),
+                _ => None,
+            }
+        }
+        fn frame(
+            app: &mut StudioApp,
+            ctx: &egui::Context,
+            events: Vec<Event>,
+            label: &str,
+        ) -> Option<Pos2> {
+            let output = ctx.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.show_catalog_controls(ui));
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| find_label(&shape.shape, label))
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("materials")).unwrap();
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo/materials/01-tekkaman.wav"),
+            root.join("materials/sample.wav"),
+        )
+        .unwrap();
+        let path = root.join("material-catalog.sqlite");
+        let mut store = SqliteCatalog::create(&path, root).unwrap();
+        let report = store.rescan().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Ok((store, path, report))).unwrap();
+        let mut app = StudioApp {
+            splitter: super::super::splitter::Splitter::default(),
+            catalog: None,
+            catalog_path: None,
+            demo_mode: false,
+            editor: None,
+            editor_settings: EditorSettings::default(),
+            catalog_task: Some(receiver),
+            catalog_attempt: 0,
+            guide_inputs: vec![],
+            plan: None,
+            selections: BTreeMap::new(),
+            active_slot: None,
+            dragged_guide_index: None,
+            status: String::new(),
+            export_task: None,
+            export_error: None,
+            saved_composition: None,
+            confirm_close: false,
+            confirm_close_metadata: false,
+            active_section: Section::Catalog,
+            related_task: None,
+        };
+        app.poll_catalog_task();
+        assert!(!app.editor.as_ref().unwrap().open);
+        app.editor.as_mut().unwrap().open = true;
+        app.active_section = Section::Guide;
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let label = "動画から素材を切り出す";
+        let pos = frame(&mut app, &ctx, vec![], label).unwrap();
+        let pointer = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        };
+        frame(
+            &mut app,
+            &ctx,
+            vec![Event::PointerMoved(pos), pointer(true)],
+            label,
+        );
+        frame(&mut app, &ctx, vec![pointer(false)], label);
+        assert!(app.active_section == Section::Catalog);
+        assert!(app.splitter.open);
+        assert!(!app.editor.as_ref().unwrap().open);
+        assert_eq!(app.editor.as_ref().unwrap().count(), 1);
+        let label = "素材の情報を登録";
+        let pos = frame(&mut app, &ctx, vec![], label).unwrap();
+        let pointer = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        };
+        frame(
+            &mut app,
+            &ctx,
+            vec![Event::PointerMoved(pos), pointer(true)],
+            label,
+        );
+        frame(&mut app, &ctx, vec![pointer(false)], label);
+        assert!(app.editor.as_ref().unwrap().open);
+        assert!(!app.splitter.open);
+    }
+
+    #[test]
     fn demo_uses_folder_next_to_distributed_executable() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("demo")).unwrap();
@@ -1414,6 +1626,7 @@ mod tests {
             roles: vec![],
         };
         let mut app = StudioApp {
+            splitter: super::super::splitter::Splitter::default(),
             catalog: Some(Catalog {
                 schema_version: 1,
                 material_root: dir.path().to_string_lossy().into_owned(),
@@ -1424,6 +1637,7 @@ mod tests {
             editor: None,
             editor_settings: EditorSettings::default(),
             catalog_task: None,
+            catalog_attempt: 0,
             guide_inputs: vec![],
             plan: Some(Plan {
                 slots: vec![SlotPlan {
