@@ -552,24 +552,9 @@ impl StudioApp {
                 "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
             ));
             ui.add_space(theme::SPACE_XS);
-            if self.catalog.is_none() {
-                ui.label(theme::detail_muted(
-                    "素材を切り出すには、先に NEW または OPEN で基準フォルダを選んでください。",
-                ));
-            }
             ui.add_enabled_ui(
                 self.catalog_task.is_none() && !self.splitter.is_busy(),
                 |ui| {
-                    if ui
-                        .add_enabled_ui(self.catalog.is_some(), |ui| {
-                            theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal)
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        self.splitter.open = true;
-                        self.active_section = Section::Catalog;
-                    }
                     ui.horizontal(|ui| {
                         if theme::action_button(
                             ui,
@@ -612,6 +597,21 @@ impl StudioApp {
                             }
                         }
                     });
+                    if self.catalog.is_none() {
+                        ui.label(theme::detail_muted(
+                            "素材を切り出すには、先に NEW または OPEN で基準フォルダを選んでください。",
+                        ));
+                    }
+                    if ui
+                        .add_enabled_ui(self.catalog.is_some(), |ui| {
+                            theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        self.splitter.open = true;
+                        self.active_section = Section::Catalog;
+                    }
                     if let Some(editor) = &mut self.editor {
                         let total = editor.count();
                         ui.label(theme::body(format!("素材ファイル: {total} 件")));
