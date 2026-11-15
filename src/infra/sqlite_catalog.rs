@@ -490,6 +490,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn opening_an_old_catalog_repeatedly_rejects_it_without_modifying_the_file() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("materials")).unwrap();
+        let path = temp.path().join("material-catalog.sqlite");
+        fs::write(&path, []).unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                SqliteCatalog::open(&path),
+                Err(CatalogError::UnsupportedSchema)
+            ));
+            assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        }
+    }
+
+    #[test]
     fn create_initializes_missing_materials_and_preserves_existing_catalog() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("material-catalog.sqlite");
