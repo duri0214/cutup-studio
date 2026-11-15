@@ -79,6 +79,25 @@ pub fn transcribe(
     expected_fingerprint: &str,
     cancel: &AtomicBool,
 ) -> Result<Vec<AnalysisCandidate>, SttError> {
+    transcribe_with_granularity(config, input, expected_fingerprint, cancel, false)
+}
+
+pub fn transcribe_for_splitting(
+    config: &SttConfig,
+    input: &Path,
+    expected_fingerprint: &str,
+    cancel: &AtomicBool,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
+    transcribe_with_granularity(config, input, expected_fingerprint, cancel, true)
+}
+
+fn transcribe_with_granularity(
+    config: &SttConfig,
+    input: &Path,
+    expected_fingerprint: &str,
+    cancel: &AtomicBool,
+    short_segments: bool,
+) -> Result<Vec<AnalysisCandidate>, SttError> {
     if fingerprint(input, cancel)? != expected_fingerprint {
         return Err(SttError::MaterialChanged);
     }
@@ -123,6 +142,9 @@ pub fn transcribe(
         .arg(&audio)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if short_segments {
+        whisper.args(["-ml", "15"]);
+    }
     run(&mut whisper, "whisper-cli", cancel)?;
     if fingerprint(input, cancel)? != expected_fingerprint {
         return Err(SttError::MaterialChanged);

@@ -78,15 +78,7 @@ impl Splitter {
         if let Some(task) = &self.task {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input, duration))) => {
-                    self.segments = segments
-                        .into_iter()
-                        .filter_map(|mut segment| {
-                            let max_ms = (duration * 1000.0).round() as u64;
-                            segment.start_ms = segment.start_ms.min(max_ms);
-                            segment.end_ms = segment.end_ms.min(max_ms);
-                            (segment.end_ms > segment.start_ms).then_some(segment)
-                        })
-                        .collect();
+                    self.segments = valid_segments(segments, duration);
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -146,11 +138,10 @@ impl Splitter {
                         ("FFmpeg", executable_exists("ffmpeg")),
                         ("Whisper", executable_exists(&settings.whisper_path)),
                         ("モデル", std::path::Path::new(&settings.model_path).is_file()),
-                        ("yt-dlp（URL用）", executable_exists("yt-dlp")),
+                        ("yt-dlp（動画から音声を取得）", executable_exists("yt-dlp")),
                     ] {
-                        theme::availability_indicator(ui, present);
+                        theme::availability_indicator(ui, present).on_hover_text(if present { "利用可能" } else { "見つかりません" });
                         ui.label(name);
-                        ui.label(if present { "検出" } else { "未検出" });
                         ui.end_row();
                     }
                 });
@@ -167,7 +158,6 @@ impl Splitter {
                     });
                     match self.source {
                         InputSource::Youtube => {
-                            ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
                             let width = ui.available_width().max(120.0);
                             if theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width).changed() {
                                 self.input = None;
@@ -230,7 +220,7 @@ impl Splitter {
                                 let hash = local_stt::fingerprint(&input, &cancel)
                                     .map_err(|e| e.to_string())?;
                                 let segments =
-                                    local_stt::transcribe(&config, &input, &hash, &cancel)
+                                    local_stt::transcribe_for_splitting(&config, &input, &hash, &cancel)
                                         .map_err(|e| e.to_string())?;
                                 Ok((segments, downloaded, input, duration))
                             })();
@@ -238,12 +228,27 @@ impl Splitter {
                         });
                     }
                     if !self.segments.is_empty() {
-                        ui.label(format!("文字起こし候補　全体 0.00–{:.2} 秒", self.duration));
-                        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                            egui::Grid::new("splitter_segments").striped(true).show(ui, |ui| {
-                                ui.label("台詞"); ui.label("範囲（動画全体）"); ui.label("開始–終了（秒）"); ui.end_row();
-                                for (index, segment) in self.segments.iter_mut().enumerate() {
-                                    if ui.selectable_label(self.selected == Some(index), &segment.text).clicked() {
+                        ui.label("文字起こし候補");
+                        ui.horizontal(|ui| {
+                            let has_selection = self.selected.is_some();
+                            ui.add_enabled_ui(has_selection, |ui| {
+                                if theme::button(ui, "再生", theme::ButtonKind::Normal).clicked() {
+                                    self.run_operation(None);
+                                }
+                                if theme::button(ui, "WAVに保存", theme::ButtonKind::Primary).clicked() {
+                                    let text = self.selected.and_then(|index| self.segments.get(index)).map(|segment| segment.text.clone()).unwrap_or_default();
+                                    self.run_operation(Some((root.to_owned(), text)));
+                                }
+                            });
+                        });
+                        egui::ScrollArea::vertical().id_salt("splitter_segments_scroll").max_height(180.0).show(ui, |ui| {
+                            for (index, segment) in self.segments.iter_mut().enumerate() {
+                                ui.horizontal(|ui| {
+                                    let short: String = segment.text.chars().take(10).collect();
+                                    let label = if segment.text.chars().count() > 10 { format!("{short}…") } else { short };
+                                    let width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
+                                    if ui.add_sized([width, 28.0], egui::Button::selectable(self.selected == Some(index), label))
+                                        .on_hover_text(&segment.text).clicked() {
                                         self.selected = Some(index);
                                         self.start = segment.start_ms as f64 / 1000.0;
                                         self.end = segment.end_ms as f64 / 1000.0;
@@ -254,44 +259,14 @@ impl Splitter {
                                         segment.start_ms = (start * 1000.0).round() as u64;
                                         segment.end_ms = (end * 1000.0).round() as u64;
                                         self.selected = Some(index);
-                                        self.start = start; self.end = end;
+                                        self.start = start;
+                                        self.end = end;
                                     }
-                                    ui.label(format!("{start:.2}–{end:.2}"));
-                                    ui.end_row();
-                                }
-                            });
-                        });
-                    }
-                    if self.selected.is_some() {
-                        ui.horizontal(|ui| {
-                            ui.label("開始（秒）");
-                            ui.add(
-                                egui::DragValue::new(&mut self.start)
-                                    .speed(0.1)
-                                    .range(0.0..=f64::MAX),
-                            );
-                            ui.label("終了（秒）");
-                            ui.add(
-                                egui::DragValue::new(&mut self.end)
-                                    .speed(0.1)
-                                    .range(0.0..=f64::MAX),
-                            );
-                        });
-                        if let Some(segment) = self.selected.and_then(|index| self.segments.get_mut(index))
-                            && self.start >= 0.0 && self.end > self.start && self.end <= self.duration {
-                                segment.start_ms = (self.start * 1000.0).round() as u64;
-                                segment.end_ms = (self.end * 1000.0).round() as u64;
-                        }
-                        ui.horizontal(|ui| {
-                            if theme::button(ui, "再生", theme::ButtonKind::Normal).clicked() {
-                                self.run_operation(None);
-                            }
-                            if theme::button(ui, "WAVに保存", theme::ButtonKind::Primary).clicked() {
-                                let text = self.selected.and_then(|index| self.segments.get(index)).map(|segment| segment.text.clone()).unwrap_or_default();
-                                self.run_operation(Some((root.to_owned(), text)));
+                                });
                             }
                         });
                     }
+
                 });
                 if busy {
                     theme::progress_message(ui, "処理中…");
@@ -339,6 +314,33 @@ impl Splitter {
     }
 }
 
+fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<AnalysisCandidate> {
+    let max_ms = (duration * 1000.0).round() as u64;
+    let mut result: Vec<AnalysisCandidate> = Vec::new();
+    let mut prefix = String::new();
+    for mut segment in segments {
+        if segment.text.trim().is_empty() {
+            continue;
+        }
+        segment.start_ms = segment.start_ms.min(max_ms);
+        segment.end_ms = segment.end_ms.min(max_ms);
+        if segment.end_ms <= segment.start_ms {
+            if let Some(previous) = result.last_mut() {
+                previous.text.push_str(&segment.text);
+            } else {
+                prefix.push_str(&segment.text);
+            }
+            continue;
+        }
+        if !prefix.is_empty() {
+            segment.text = format!("{prefix}{}", segment.text);
+            prefix.clear();
+        }
+        result.push(segment);
+    }
+    result
+}
+
 fn range_slider(
     ui: &mut egui::Ui,
     index: usize,
@@ -346,7 +348,7 @@ fn range_slider(
     start: &mut f64,
     end: &mut f64,
 ) -> bool {
-    let width = (ui.available_width() - 110.0).max(100.0);
+    let width = ui.available_width().max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
@@ -442,6 +444,34 @@ mod tests {
         );
         splitter.set_source(super::InputSource::Youtube);
         assert!(splitter.input.is_none());
+    }
+
+    #[test]
+    fn zero_length_tokens_keep_their_text_in_the_neighbouring_clip() {
+        use crate::domain::valueobject::catalog::AnalysisCandidate;
+        let candidate = |text: &str, start_ms, end_ms| AnalysisCandidate {
+            text: text.into(),
+            original_text: None,
+            language: None,
+            start_ms,
+            end_ms,
+            model: String::new(),
+            model_version: String::new(),
+            confidence: None,
+            evidence: None,
+        };
+        let segments = super::valid_segments(
+            vec![
+                candidate("テ", 0, 0),
+                candidate("ッカマ", 0, 900),
+                candidate("ン", 900, 900),
+                candidate(" ", 900, 1000),
+            ],
+            1.0,
+        );
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "テッカマン");
+        assert_eq!((segments[0].start_ms, segments[0].end_ms), (0, 900));
     }
 
     #[cfg(windows)]
