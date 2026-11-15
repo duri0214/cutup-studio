@@ -45,6 +45,7 @@ struct GuideInput {
 }
 
 pub struct StudioApp {
+    splitter: super::splitter::Splitter,
     catalog: Option<Catalog>,
     catalog_path: Option<PathBuf>,
     demo_mode: bool,
@@ -74,6 +75,7 @@ impl StudioApp {
             .and_then(|storage| eframe::get_value(storage, "editor_settings"))
             .unwrap_or_default();
         Self {
+            splitter: super::splitter::Splitter::default(),
             catalog: None,
             catalog_path: None,
             demo_mode: false,
@@ -464,6 +466,9 @@ impl StudioApp {
     }
 
     fn system_status(&self) -> (theme::State, &'static str) {
+        if self.splitter.error().is_some() {
+            return (theme::State::Error, "ERROR");
+        }
         if self.status.starts_with("RELATED ERROR")
             || self.status.starts_with("EXPORT ERROR")
             || self.status.starts_with("CATALOG ERROR")
@@ -544,6 +549,10 @@ impl StudioApp {
             ));
             ui.add_space(theme::SPACE_XS);
             ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
+                if theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal).clicked()
+                {
+                    self.splitter.open = true;
+                }
                 ui.horizontal(|ui| {
                     if theme::action_button(
                         ui,
@@ -1074,6 +1083,12 @@ impl eframe::App for StudioApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        let settings = self
+            .editor
+            .as_ref()
+            .map(CatalogEditor::settings)
+            .unwrap_or_else(|| self.editor_settings.clone());
+        self.splitter.show(context, &settings);
         if context.input(|input| input.viewport().close_requested()) {
             let metadata_dirty = self
                 .editor
@@ -1217,7 +1232,9 @@ impl eframe::App for StudioApp {
         egui::TopBottomPanel::bottom("status").show(context, |ui| {
             ui.horizontal(|ui| {
                 theme::state_badge(ui, status_label, status_state);
-                if let Some((state, message)) = self
+                if let Some(error) = self.splitter.error() {
+                    theme::state_message(ui, theme::State::Error, error);
+                } else if let Some((state, message)) = self
                     .editor
                     .as_ref()
                     .filter(|editor| editor.open && self.active_section == Section::Catalog)
@@ -1394,6 +1411,7 @@ mod tests {
             roles: vec![],
         };
         let mut app = StudioApp {
+            splitter: super::super::splitter::Splitter::default(),
             catalog: Some(Catalog {
                 schema_version: 1,
                 material_root: dir.path().to_string_lossy().into_owned(),

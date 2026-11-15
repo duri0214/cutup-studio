@@ -37,11 +37,11 @@ type AnalysisTask = Receiver<(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct EditorSettings {
-    whisper_path: String,
-    model_path: String,
+    pub(super) whisper_path: String,
+    pub(super) model_path: String,
     ollama_model: String,
     speech_recognition: bool,
-    speech_language: SpeechLanguage,
+    pub(super) speech_language: SpeechLanguage,
 }
 
 impl Default for EditorSettings {

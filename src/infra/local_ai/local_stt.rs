@@ -134,7 +134,7 @@ pub fn transcribe(
     )
 }
 
-fn fingerprint(path: &Path, cancel: &AtomicBool) -> Result<String, SttError> {
+pub fn fingerprint(path: &Path, cancel: &AtomicBool) -> Result<String, SttError> {
     let mut file = fs::File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 65536];
