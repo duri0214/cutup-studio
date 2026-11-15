@@ -51,6 +51,11 @@ pub const CAPTION_TEXT_SIZE: f32 = 10.0;
 pub const BRAND_TEXT_SIZE: f32 = 25.0;
 pub const BUTTON_TEXT_SIZE: f32 = 12.0;
 pub const TAB_TEXT_SIZE: f32 = 12.0;
+const NEW_ICON_VERTICAL_NUDGE: f32 = 1.0;
+const OPEN_ICON_VERTICAL_NUDGE: f32 = 0.0;
+const NEW_TEXT_VERTICAL_NUDGE: f32 = 1.0;
+const DEMO_LABEL_VERTICAL_NUDGE: f32 = 3.5;
+const DEMO_TOGGLE_VERTICAL_NUDGE: f32 = 0.5;
 pub const INPUT_HEIGHT: f32 = 30.0;
 pub const FORM_LABEL_WIDTH: f32 = 90.0;
 pub const SUGGESTION_LIST_HEIGHT: f32 = 220.0;
@@ -401,7 +406,8 @@ pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
         CONTROL
     };
     let stroke = if selected { ACCENT } else { BORDER };
-    ui.add(
+    ui.add_sized(
+        [FORM_LABEL_WIDTH, 24.0],
         egui::Button::new(
             RichText::new(text)
                 .size(DETAIL_TEXT_SIZE)
@@ -410,7 +416,7 @@ pub fn role_label(ui: &mut Ui, text: &str, selected: bool) -> Response {
         )
         .fill(fill)
         .stroke(Stroke::new(1.0_f32, stroke))
-        .min_size(Vec2::new(48.0, 24.0)),
+        .truncate(),
     )
     .on_hover_text("この枠の候補を右ペインに表示")
 }
@@ -704,13 +710,19 @@ pub fn action_button(
 ) -> Response {
     let enabled = ui.is_enabled();
     let text_color = button_text_color(kind, enabled);
-    let mut button = egui::Button::image_and_text(
-        action_icon_image(icon),
+    let font = FontId::proportional(BUTTON_TEXT_SIZE);
+    let text_galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), text_color);
+    let text_width = text_galley.size().x;
+    let icon_size = Vec2::splat(16.0);
+    let content_gap = SPACE_XS;
+    let content_width = icon_size.x + content_gap + text_width;
+    let mut button = egui::Button::new(
         RichText::new(label)
             .size(BUTTON_TEXT_SIZE)
-            .color(text_color),
+            .color(Color32::TRANSPARENT),
     )
-    .image_tint_follows_text_color(true)
     .min_size(size)
     .corner_radius(CONTROL_RADIUS);
     if enabled {
@@ -722,7 +734,37 @@ pub fn action_button(
                 .stroke(Stroke::new(1.0_f32, RED.gamma_multiply(0.5))),
         };
     }
-    ui.add_sized(size, button)
+    let response = ui.add_sized(size, button);
+    let content_left = response.rect.center().x - content_width * 0.5;
+    let center_y = response.rect.center().y;
+    // The folder-plus artwork appears top-heavy beside the text at the geometric center.
+    let icon_vertical_nudge = match icon {
+        ActionIcon::New => NEW_ICON_VERTICAL_NUDGE,
+        ActionIcon::Open => OPEN_ICON_VERTICAL_NUDGE,
+        _ => 0.0,
+    };
+    let icon_center_y = center_y + icon_vertical_nudge;
+    paint_action_icon(
+        ui,
+        icon,
+        Pos2::new(content_left + icon_size.x * 0.5, icon_center_y),
+        icon_size,
+        text_color,
+    );
+    // Center the visible glyphs, since the font line box is not optically centered.
+    let text_origin_y = center_y
+        + if icon == ActionIcon::New {
+            NEW_TEXT_VERTICAL_NUDGE
+        } else {
+            0.0
+        }
+        - text_galley.mesh_bounds.center().y;
+    ui.painter().galley(
+        Pos2::new(content_left + icon_size.x + content_gap, text_origin_y),
+        text_galley,
+        text_color,
+    );
+    response
 }
 
 pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
@@ -785,14 +827,20 @@ pub fn toggle_button(ui: &mut Ui, label: &str, on: bool, size: Vec2) -> Response
         MUTED
     };
     ui.painter().text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Pos2::new(
+            rect.left() + 10.0,
+            rect.center().y + DEMO_LABEL_VERTICAL_NUDGE,
+        ),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(BUTTON_TEXT_SIZE),
         text_color,
     );
     let track = egui::Rect::from_center_size(
-        Pos2::new(rect.right() - 24.0, rect.center().y),
+        Pos2::new(
+            rect.right() - 24.0,
+            rect.center().y + DEMO_TOGGLE_VERTICAL_NUDGE,
+        ),
         Vec2::new(28.0, 16.0),
     );
     ui.painter().rect_filled(
@@ -932,6 +980,24 @@ mod tests {
         );
 
         assert!(clicked);
+    }
+
+    #[test]
+    fn role_labels_have_a_fixed_width_for_aligned_rows() {
+        let context = egui::Context::default();
+        let mut widths = Vec::new();
+        let _ = context.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widths.push(super::role_label(ui, "導入", false).rect.width());
+                widths.push(
+                    super::role_label(ui, "スポーツイベント", false)
+                        .rect
+                        .width(),
+                );
+            });
+        });
+
+        assert_eq!(widths, [super::FORM_LABEL_WIDTH, super::FORM_LABEL_WIDTH]);
     }
 
     #[test]

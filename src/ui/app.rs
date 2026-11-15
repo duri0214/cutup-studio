@@ -708,21 +708,18 @@ impl StudioApp {
                 }
             });
             ui.add_space(theme::SPACE_XS);
-            let model = self.editor.as_ref().and_then(CatalogEditor::selected_ollama_model).map(str::to_owned);
-            let slot = self.active_slot.and_then(|index| self.plan.as_ref()?.slots.get(index)).map(|s| s.slot.clone());
-            if ui.add_enabled(model.is_some() && slot.is_some() && self.related_task.is_none(), egui::Button::new("Ollama で関連素材を探す")).clicked()
-                && let (Some(model), Some(slot)) = (model, slot) {
-                let (sender, receiver) = mpsc::channel();
-                self.related_task = Some(receiver);
-                self.status = "関連語を生成しています。従来の候補も利用できます。".into();
-                self.active_section = Section::Guide;
-                ui.ctx().request_repaint();
-                std::thread::spawn(move || {
-                    let result = ollama::related_terms(&model, &slot.query);
-                    let _ = sender.send((slot.id, slot.role, slot.query, result));
-                });
+            let has_model = self
+                .editor
+                .as_ref()
+                .and_then(CatalogEditor::selected_ollama_model)
+                .is_some();
+            if self.related_task.is_some() {
+                theme::progress_message(ui, &self.status);
+            } else if !has_model {
+                ui.label(theme::detail_muted(
+                    "関連素材を探すには、01 の設定で Ollama モデルを選んでください。",
+                ));
             }
-            ui.label(theme::detail_muted("関連素材の探索には、01 の設定で Ollama モデルを選んでください。"));
             let mut remove_index = None;
             let mut drag_started = None;
             let mut drag_stopped = false;
@@ -730,6 +727,7 @@ impl StudioApp {
             let dragged_index = self.dragged_guide_index;
             let can_remove = self.guide_inputs.len() > 1;
             let mut populated_order = 0;
+            let mut related_input = None;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
                 let slot_index = if guide_input.query.trim().is_empty() {
                     None
@@ -737,17 +735,30 @@ impl StudioApp {
                     populated_order += 1;
                     Some(populated_order - 1)
                 };
-                let label = slot_index.map_or_else(
-                    || guide_input.role.clone(),
-                    |slot_index| format!("{:02} {}", slot_index + 1, guide_input.role),
-                );
+                let row_number = format!("{:02}", index + 1);
                 let row = ui.horizontal(|ui| {
                     let drag_response = theme::drag_handle(ui);
                     if drag_response.drag_started() {
                         drag_started = Some(index);
                     }
                     drag_stopped |= drag_response.drag_stopped();
-                    if theme::role_label(ui, &label, slot_index == self.active_slot).clicked() {
+                    let (number_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(theme::SPACE_XL, 24.0),
+                        egui::Sense::hover(),
+                    );
+                    let role_response = theme::role_label(
+                        ui,
+                        &guide_input.role,
+                        slot_index == self.active_slot,
+                    );
+                    ui.painter().text(
+                        egui::pos2(number_rect.center().x, role_response.rect.center().y),
+                        egui::Align2::CENTER_CENTER,
+                        row_number,
+                        egui::FontId::proportional(theme::DETAIL_TEXT_SIZE),
+                        theme::MUTED,
+                    );
+                    if role_response.clicked() {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
@@ -759,6 +770,25 @@ impl StudioApp {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
+                    }
+                    let can_search_related = has_model
+                        && !guide_input.query.trim().is_empty()
+                        && self.related_task.is_none();
+                    if ui
+                        .add_enabled_ui(can_search_related, |ui| {
+                            theme::icon_button(
+                                ui,
+                                theme::ActionIcon::Ollama,
+                                "このレイヤーの関連素材を探す",
+                                theme::ButtonKind::Normal,
+                            )
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        related_input = Some(index);
+                        focused_guide = Some(index);
+                        self.active_section = Section::Guide;
                     }
                     if can_remove
                         && theme::icon_button(
@@ -822,6 +852,31 @@ impl StudioApp {
                 && let Some(slot_index) = active_slot_for_input(&self.guide_inputs, index)
             {
                 self.active_slot = Some(slot_index);
+            }
+            if let Some(index) = related_input
+                && let Some(slot_index) = active_slot_for_input(&self.guide_inputs, index)
+                && let Some(model) = self
+                    .editor
+                    .as_ref()
+                    .and_then(CatalogEditor::selected_ollama_model)
+                    .map(str::to_owned)
+                && let Some(slot) = self
+                    .plan
+                    .as_ref()
+                    .and_then(|plan| plan.slots.get(slot_index))
+                    .map(|slot| slot.slot.clone())
+            {
+                let (sender, receiver) = mpsc::channel();
+                self.related_task = Some(receiver);
+                self.status = format!(
+                    "「{}」の関連語を生成しています。従来の候補も利用できます。",
+                    slot.query
+                );
+                ui.ctx().request_repaint();
+                std::thread::spawn(move || {
+                    let result = ollama::related_terms(&model, &slot.query);
+                    let _ = sender.send((slot.id, slot.role, slot.query, result));
+                });
             }
         });
     }
@@ -1125,7 +1180,7 @@ impl eframe::App for StudioApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        let settings = self
+        let mut settings = self
             .editor
             .as_ref()
             .map(CatalogEditor::settings)
@@ -1180,8 +1235,15 @@ impl eframe::App for StudioApp {
                                         && slot.slot.query == query
                                 })
                             {
-                                add_related_candidates(catalog, slot, &terms);
-                                self.status = "関連語に一致する素材を候補に追加しました。採用する素材を選んでください。".into();
+                                let (matched, added) =
+                                    add_related_candidates(catalog, slot, &terms);
+                                self.status = if matched == 0 {
+                                    "生成された関連語に一致する素材はありませんでした。関連語と登録済みの探す語句を確認してください。".into()
+                                } else {
+                                    format!(
+                                        "関連語に一致した素材は {matched} 件です。新しい候補を {added} 件追加しました。"
+                                    )
+                                };
                             }
                         }
                         Err(error) => {
@@ -1330,9 +1392,13 @@ impl eframe::App for StudioApp {
                     {
                         self.splitter.show(
                             ui,
-                            &settings,
+                            &mut settings,
                             std::path::Path::new(&catalog.material_root),
                         );
+                        self.editor_settings.candidate_width = settings.candidate_width;
+                        if let Some(editor) = &mut self.editor {
+                            editor.set_candidate_width(settings.candidate_width);
+                        }
                     } else if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =
@@ -1392,10 +1458,13 @@ fn add_related_candidates(
     catalog: &Catalog,
     slot: &mut crate::domain::valueobject::SlotPlan,
     terms: &[String],
-) {
+) -> (usize, usize) {
+    let mut matched_materials = BTreeSet::new();
+    let mut added = 0;
     for term in terms {
         let related = create_plan(catalog, &format!("{}: {}", slot.slot.role, term));
         for mut candidate in related.slots.into_iter().flat_map(|s| s.candidates) {
+            matched_materials.insert(candidate.material_id.clone());
             if !slot
                 .candidates
                 .iter()
@@ -1405,9 +1474,11 @@ fn add_related_candidates(
                     .reasons
                     .insert(0, format!("Ollama の関連語「{term}」に一致"));
                 slot.candidates.push(candidate);
+                added += 1;
             }
         }
     }
+    (matched_materials.len(), added)
 }
 
 fn same_composition(a: Option<&CompositionRecipe>, b: Option<&CompositionRecipe>) -> bool {
@@ -1694,13 +1765,86 @@ mod tests {
         };
         let mut plan = create_plan(&catalog, "導入: りんご");
         assert!(plan.slots[0].candidates.is_empty());
-        add_related_candidates(&catalog, &mut plan.slots[0], &["梨".into()]);
+        let counts = add_related_candidates(&catalog, &mut plan.slots[0], &["梨".into()]);
+        assert_eq!(counts, (1, 1));
         assert_eq!(plan.slots[0].candidates.len(), 1);
         assert!(
             plan.slots[0].candidates[0]
                 .reasons
                 .iter()
                 .any(|r| r.contains("探す語句") && r.contains("梨"))
+        );
+    }
+
+    #[test]
+    fn related_terms_without_a_catalog_match_return_zero_counts() {
+        use crate::domain::valueobject::CatalogMaterial;
+        let catalog = Catalog {
+            schema_version: 1,
+            material_root: String::new(),
+            materials: vec![CatalogMaterial {
+                id: "pear".into(),
+                source_path: "pear.wav".into(),
+                keywords: vec!["梨".into()],
+                tags: vec![],
+                roles: vec!["導入".into()],
+                note: String::new(),
+            }],
+        };
+        let mut plan = create_plan(&catalog, "導入: りんご");
+
+        let counts = add_related_candidates(&catalog, &mut plan.slots[0], &["トマト".into()]);
+
+        assert_eq!(counts, (0, 0));
+        assert!(plan.slots[0].candidates.is_empty());
+    }
+
+    #[test]
+    fn related_terms_show_a_material_once_and_keep_its_first_match() {
+        use crate::domain::valueobject::CatalogMaterial;
+        let catalog = Catalog {
+            schema_version: 1,
+            material_root: String::new(),
+            materials: vec![
+                CatalogMaterial {
+                    id: "pear".into(),
+                    source_path: "pear.wav".into(),
+                    keywords: vec!["梨".into(), "和梨".into()],
+                    tags: vec![],
+                    roles: vec!["導入".into()],
+                    note: String::new(),
+                },
+                CatalogMaterial {
+                    id: "pear-visual".into(),
+                    source_path: "pear-visual.wav".into(),
+                    keywords: vec!["和梨".into()],
+                    tags: vec![],
+                    roles: vec!["導入".into()],
+                    note: String::new(),
+                },
+            ],
+        };
+        let mut plan = create_plan(&catalog, "導入: りんご");
+        assert!(plan.slots[0].candidates.is_empty());
+
+        let counts =
+            add_related_candidates(&catalog, &mut plan.slots[0], &["梨".into(), "和梨".into()]);
+
+        assert_eq!(counts, (2, 2));
+        assert_eq!(plan.slots[0].candidates.len(), 2);
+        assert_eq!(plan.slots[0].candidates[0].material_id, "pear");
+        assert_eq!(plan.slots[0].candidates[1].material_id, "pear-visual");
+        assert!(
+            plan.slots[0].candidates[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("関連語「梨」"))
+        );
+        assert!(
+            !plan.slots[0].candidates[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("関連語「和梨」"))
         );
     }
 

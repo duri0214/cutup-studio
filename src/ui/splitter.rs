@@ -5,7 +5,7 @@ use super::{
 use crate::{
     domain::valueobject::catalog::AnalysisCandidate,
     infra::{
-        local_ai::local_stt::{self, SttConfig},
+        local_ai::local_stt::{self, CandidateWidth, SttConfig},
         splitter,
     },
 };
@@ -37,14 +37,23 @@ enum InputSource {
     Local,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum SplitterView {
+    #[default]
+    Input,
+    Results,
+}
+
 #[derive(Default)]
 pub(super) struct Splitter {
     pub open: bool,
+    active_view: SplitterView,
     source: InputSource,
     input: Option<PathBuf>,
     url: String,
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
+    initial_ranges: Vec<(u64, u64)>,
     reset_result_scroll: bool,
     result_ready: bool,
     duration: f64,
@@ -69,6 +78,7 @@ impl Splitter {
             self.url.clear();
             self.downloaded = None;
             self.segments.clear();
+            self.initial_ranges.clear();
             self.result_ready = false;
             self.selected = None;
             self.error = None;
@@ -95,8 +105,14 @@ impl Splitter {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input, duration))) => {
                     self.segments = valid_segments(segments, duration);
+                    self.initial_ranges = self
+                        .segments
+                        .iter()
+                        .map(|segment| (segment.start_ms, segment.end_ms))
+                        .collect();
                     self.reset_result_scroll = true;
                     self.result_ready = true;
+                    self.active_view = SplitterView::Results;
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -140,17 +156,46 @@ impl Splitter {
             }
         }
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings, root: &std::path::Path) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        settings: &mut EditorSettings,
+        root: &std::path::Path,
+    ) {
         theme::panel().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    theme::pane_title(ui, "動画から素材を切り出す");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::icon_button(ui, theme::ActionIcon::Close, "閉じる", theme::ButtonKind::Normal).clicked() {
-                            self.open = false;
-                        }
-                    });
+            let busy = self.is_busy();
+            ui.horizontal(|ui| {
+                theme::pane_title(ui, "動画から素材を切り出す");
+                ui.add_space(theme::SPACE_XS);
+                if self.result_ready || self.active_view == SplitterView::Results {
+                    let label = if self.active_view == SplitterView::Results {
+                        "入力へ戻る"
+                    } else {
+                        "結果を見る"
+                    };
+                    if theme::button(ui, label, theme::ButtonKind::Normal).clicked() {
+                        self.active_view = match self.active_view {
+                            SplitterView::Input => SplitterView::Results,
+                            SplitterView::Results => SplitterView::Input,
+                        };
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::icon_button(
+                        ui,
+                        theme::ActionIcon::Close,
+                        "閉じる",
+                        theme::ButtonKind::Normal,
+                    )
+                    .clicked()
+                    {
+                        self.open = false;
+                    }
                 });
-                let busy = self.task.is_some() || self.operation.is_some();
+            });
+
+            if self.active_view == SplitterView::Input {
+                let previous_candidate_width = settings.candidate_width;
                 ui.label("必要なツール（ファイルの有無）");
                 egui::Grid::new("splitter_tool_status").show(ui, |ui| {
                     for (name, present) in [
@@ -159,13 +204,37 @@ impl Splitter {
                         ("モデル", std::path::Path::new(&settings.model_path).is_file()),
                         ("yt-dlp（動画から音声を取得）", executable_exists("yt-dlp")),
                     ] {
-                        theme::availability_indicator(ui, present).on_hover_text(if present { "利用可能" } else { "見つかりません" });
+                        theme::availability_indicator(ui, present)
+                            .on_hover_text(if present { "利用可能" } else { "見つかりません" });
                         ui.label(name);
                         ui.end_row();
                     }
                 });
                 ui.label("Whisper とモデルは素材の「設定」で指定できます。PATH 変更後はアプリを再起動してください。");
                 ui.add_enabled_ui(!busy, |ui| {
+                    ui.horizontal(|ui| {
+                        theme::form_label(ui, "候補のまとまり");
+                        egui::ComboBox::from_id_salt("splitter_candidate_width")
+                            .selected_text(match settings.candidate_width {
+                                CandidateWidth::Standard => "標準",
+                                CandidateWidth::Wide => "広め",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut settings.candidate_width,
+                                    CandidateWidth::Standard,
+                                    "標準",
+                                );
+                                ui.selectable_value(
+                                    &mut settings.candidate_width,
+                                    CandidateWidth::Wide,
+                                    "広め",
+                                );
+                            });
+                        ui.label(theme::detail_muted(
+                            "広めは「驚くべきことに」のようにまとめます。切替後は再解析してください。",
+                        ));
+                    });
                     ui.label("動画の入力元");
                     ui.horizontal(|ui| {
                         if ui.radio(self.source == InputSource::Youtube, "YouTube URL").clicked() {
@@ -180,12 +249,15 @@ impl Splitter {
                         InputSource::Youtube => {
                             let width = ui.available_width().max(120.0);
                             let response = theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width);
-                            submit_url = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) && !self.url.trim().is_empty();
+                            submit_url = response.lost_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                && !self.url.trim().is_empty();
                             if response.changed() {
                                 self.input = None;
                                 self.downloaded = None;
                                 self.segments.clear();
-            self.result_ready = false;
+                                self.initial_ranges.clear();
+                                self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -197,7 +269,8 @@ impl Splitter {
                             {
                                 self.input = Some(path);
                                 self.segments.clear();
-            self.result_ready = false;
+                                self.initial_ranges.clear();
+                                self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
                                 self.saved = None;
@@ -212,7 +285,8 @@ impl Splitter {
                             self.input.is_some() || !self.url.trim().is_empty(),
                             egui::Button::new("音声を抽出・文字起こし"),
                         )
-                        .clicked() || submit_url
+                        .clicked()
+                        || submit_url
                     {
                         let local_input = self.input.clone();
                         let url = self.url.trim().to_owned();
@@ -221,11 +295,13 @@ impl Splitter {
                             whisper: settings.whisper_path.clone().into(),
                             model: settings.model_path.clone().into(),
                             language: settings.speech_language,
+                            candidate_width: settings.candidate_width,
                         };
                         let (tx, rx) = mpsc::channel();
                         self.task = Some(rx);
                         self.segments.clear();
-            self.result_ready = false;
+                        self.initial_ranges.clear();
+                        self.result_ready = false;
                         self.selected = None;
                         self.error = None;
                         std::thread::spawn(move || {
@@ -252,64 +328,131 @@ impl Splitter {
                             let _ = tx.send(result);
                         });
                     }
-                    if !self.segments.is_empty() {
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        let reset_scroll = std::mem::take(&mut self.reset_result_scroll);
-                        let heading = ui.label("文字起こし結果");
-                        if reset_scroll {
-                            heading.scroll_to_me(Some(egui::Align::Min));
-                        }
-                        if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
-                            self.save_all(root.to_owned());
-                        }
-                        let mut action = None;
-                        ui.scope(|ui| {
-                            ui.style_mut().spacing.scroll.floating = false;
-                            results_scroll_area(reset_scroll).show(ui, |ui| {
+                });
+                if settings.candidate_width != previous_candidate_width {
+                    self.segments.clear();
+                    self.initial_ranges.clear();
+                    self.result_ready = false;
+                    self.selected = None;
+                    self.error = None;
+                }
+                if busy {
+                    theme::progress_message(ui, "処理中…");
+                }
+            } else if self.segments.is_empty() {
+                if busy {
+                    theme::progress_message(ui, "処理中…");
+                } else if self.result_ready {
+                    ui.label("候補がありません。「入力へ戻る」から別の動画を選んでください。");
+                } else {
+                    ui.label("文字起こし後に、候補をここに表示します。");
+                }
+            } else {
+                let mut action = None;
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "文字起こし結果（{}）",
+                            match settings.candidate_width {
+                                CandidateWidth::Standard => "標準",
+                                CandidateWidth::Wide => "広め",
+                            }
+                        ));
+                        ui.label(theme::detail_muted("各候補の前後2秒を拡大表示"));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
+                                self.save_all(root.to_owned());
+                            }
+                        });
+                    });
+                    ui.scope(|ui| {
+                        ui.style_mut().spacing.scroll.floating = false;
+                        results_scroll_area(std::mem::take(&mut self.reset_result_scroll)).show(ui, |ui| {
                             let label_width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
-                                    if segment_label(ui, &segment.text, self.selected == Some(index), label_width).clicked() {
+                                    if segment_label(
+                                        ui,
+                                        &segment.text,
+                                        self.selected == Some(index),
+                                        label_width,
+                                    )
+                                    .clicked()
+                                    {
                                         self.selected = Some(index);
                                         self.start = segment.start_ms as f64 / 1000.0;
                                         self.end = segment.end_ms as f64 / 1000.0;
                                     }
                                     let mut start = segment.start_ms as f64 / 1000.0;
                                     let mut end = segment.end_ms as f64 / 1000.0;
-                                    if range_slider(ui, index, self.duration, &mut start, &mut end) {
+                                    let (initial_start_ms, initial_end_ms) = self
+                                        .initial_ranges
+                                        .get(index)
+                                        .copied()
+                                        .unwrap_or((segment.start_ms, segment.end_ms));
+                                    let initial_range = (
+                                        initial_start_ms as f64 / 1000.0,
+                                        initial_end_ms as f64 / 1000.0,
+                                    );
+                                    if range_slider(
+                                        ui,
+                                        index,
+                                        self.duration,
+                                        &mut start,
+                                        &mut end,
+                                        initial_range,
+                                    )
+                                    .0
+                                    {
                                         segment.start_ms = (start * 1000.0).round() as u64;
                                         segment.end_ms = (end * 1000.0).round() as u64;
                                         self.selected = Some(index);
                                         self.start = start;
                                         self.end = end;
                                     }
-                                    if theme::icon_button(ui, theme::ActionIcon::Play, "再生", theme::ButtonKind::Normal).clicked() { action = Some((index, false)); }
-                                    if theme::icon_button(ui, theme::ActionIcon::Save, "WAVに保存", theme::ButtonKind::Normal).clicked() { action = Some((index, true)); }
+                                    if theme::icon_button(
+                                        ui,
+                                        theme::ActionIcon::Play,
+                                        "再生",
+                                        theme::ButtonKind::Normal,
+                                    )
+                                    .clicked()
+                                    {
+                                        action = Some((index, false));
+                                    }
+                                    if theme::icon_button(
+                                        ui,
+                                        theme::ActionIcon::Save,
+                                        "WAVに保存",
+                                        theme::ButtonKind::Normal,
+                                    )
+                                    .clicked()
+                                    {
+                                        action = Some((index, true));
+                                    }
                                 });
                             }
-                            });
                         });
-                        if let Some((index, save)) = action {
-                            let segment = &self.segments[index];
-                            self.selected = Some(index);
-                            self.start = segment.start_ms as f64 / 1000.0;
-                            self.end = segment.end_ms as f64 / 1000.0;
-                            let output = save.then(|| (root.to_owned(), segment.text.clone()));
-                            self.run_operation(output);
-                        }
-                    }
-
+                    });
                 });
+                if let Some((index, save)) = action {
+                    let segment = &self.segments[index];
+                    self.selected = Some(index);
+                    self.start = segment.start_ms as f64 / 1000.0;
+                    self.end = segment.end_ms as f64 / 1000.0;
+                    let output = save.then(|| (root.to_owned(), segment.text.clone()));
+                    self.run_operation(output);
+                }
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 }
-if let Some(error) = &self.error {
-                    theme::state_message(ui, theme::State::Error, error);
-                }
-            });
+            }
+            if let Some(error) = &self.error {
+                theme::state_message(ui, theme::State::Error, error);
+            }
+        });
     }
+
     fn save_all(&mut self, root: PathBuf) {
         let Some(input) = self.input.clone() else {
             return;
@@ -404,12 +547,23 @@ fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<Analys
 fn results_scroll_area(reset: bool) -> egui::ScrollArea {
     let area = egui::ScrollArea::vertical()
         .id_salt("splitter_segments_scroll")
-        .max_height(180.0)
+        .max_height(480.0)
         .auto_shrink([false, true]);
     if reset {
         area.vertical_scroll_offset(0.0)
     } else {
         area
+    }
+}
+
+fn slider_window(duration: f64, start: f64, end: f64) -> (f64, f64) {
+    const CONTEXT_SECONDS: f64 = 2.0;
+    let view_start = (start - CONTEXT_SECONDS).clamp(0.0, duration);
+    let view_end = (end + CONTEXT_SECONDS).clamp(0.0, duration);
+    if view_end > view_start {
+        (view_start, view_end)
+    } else {
+        (0.0, duration)
     }
 }
 
@@ -427,23 +581,38 @@ fn range_slider(
     duration: f64,
     start: &mut f64,
     end: &mut f64,
-) -> bool {
+    initial_range: (f64, f64),
+) -> (bool, egui::Rect) {
     const TRAILING_WIDTH: f32 = 92.0; // Two icons, their gaps, and 16 px before the scrollbar.
     let width = (ui.available_width() - TRAILING_WIDTH).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {
-        return false;
+        return (false, rect);
     }
     let left = rect.left() + 7.0;
     let right = rect.right() - 7.0;
-    let x = |t: f64| egui::lerp(left..=right, (t / duration).clamp(0.0, 1.0) as f32);
+    let (view_start, view_end) = slider_window(duration, initial_range.0, initial_range.1);
+    let view_duration = (view_end - view_start).max(f64::EPSILON);
+    let x = |time: f64| {
+        egui::lerp(
+            left..=right,
+            ((time - view_start) / view_duration).clamp(0.0, 1.0) as f32,
+        )
+    };
     let start_x = x(*start);
     let end_x = x(*end);
     let id = ui.id().with(("range_handle", index));
     let mut changed = false;
-    if response.drag_started() || response.clicked() {
-        let origin = ui.input(|input| input.pointer.press_origin());
+    let primary_pressed = response.hovered()
+        && ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary));
+    if response.drag_started() || response.clicked() || primary_pressed {
+        let origin = if response.clicked() {
+            response.interact_pointer_pos()
+        } else {
+            ui.input(|input| input.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+        };
         let handle = origin.and_then(|pos| {
             let start_distance = (pos.x - start_x).abs();
             let end_distance = (pos.x - end_x).abs();
@@ -454,6 +623,9 @@ fn range_slider(
             }
         });
         ui.ctx().data_mut(|data| data.insert_temp(id, handle));
+        if handle.is_some() {
+            response.request_focus();
+        }
     }
     if (response.dragged() || response.clicked())
         && let Some(pos) = response.interact_pointer_pos()
@@ -462,13 +634,57 @@ fn range_slider(
             .data(|data| data.get_temp::<Option<bool>>(id))
             .flatten()
     {
-        let value = ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * duration;
+        let value =
+            view_start + ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * view_duration;
         if is_start {
             *start = value.min((*end - 0.001).max(0.0));
         } else {
             *end = value.max((*start + 0.001).min(duration));
         }
         changed = true;
+    }
+    let selected_handle = ui
+        .ctx()
+        .data(|data| data.get_temp::<Option<bool>>(id))
+        .flatten();
+    if response.has_focus() {
+        ui.ctx().memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+    }
+    if response.has_focus()
+        && let Some(is_start) = selected_handle
+        && let Some(delta) = ui.input(|input| {
+            if input.key_pressed(egui::Key::ArrowLeft) {
+                Some(-0.01)
+            } else if input.key_pressed(egui::Key::ArrowRight) {
+                Some(0.01)
+            } else {
+                None
+            }
+        })
+    {
+        if is_start {
+            let maximum = (*end - 0.001).max(0.0);
+            let adjusted = (*start + delta).clamp(0.0, maximum);
+            if adjusted != *start {
+                *start = adjusted;
+                changed = true;
+            }
+        } else {
+            let minimum = (*start + 0.001).min(duration);
+            let adjusted = (*end + delta).clamp(minimum, duration);
+            if adjusted != *end {
+                *end = adjusted;
+                changed = true;
+            }
+        }
     }
     let painter = ui.painter();
     let y = rect.center().y;
@@ -480,18 +696,23 @@ fn range_slider(
         [egui::pos2(x(*start), y), egui::pos2(x(*end), y)],
         egui::Stroke::new(5.0_f32, theme::ACCENT),
     );
-    for position in [x(*start), x(*end)] {
-        painter.rect_filled(
-            egui::Rect::from_center_size(egui::pos2(position, y), egui::vec2(9.0, 18.0)),
-            egui::CornerRadius::same(2),
-            theme::ACCENT,
-        );
+    for (is_start, position) in [(true, x(*start)), (false, x(*end))] {
+        let handle = egui::Rect::from_center_size(egui::pos2(position, y), egui::vec2(9.0, 18.0));
+        painter.rect_filled(handle, egui::CornerRadius::same(2), theme::ACCENT);
+        if response.has_focus() && selected_handle == Some(is_start) {
+            painter.rect_stroke(
+                handle,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(1.5_f32, theme::TEXT),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
     response.on_hover_text(format!(
-        "開始 {:.2} 秒 / 終了 {:.2} 秒。両端をドラッグ",
-        *start, *end
+        "前後2秒を拡大表示（{view_start:.2}～{view_end:.2}秒）。開始 {:.2} 秒 / 終了 {:.2} 秒。端をクリックして←/→で0.01秒調整、ドラッグで範囲調整",
+        *start, *end,
     ));
-    changed
+    (changed, rect)
 }
 
 #[cfg(windows)]
@@ -517,6 +738,39 @@ fn play(path: &std::path::Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn completed_transcription_selects_the_results_view() {
+        use eframe::egui::Context;
+        use std::sync::mpsc;
+
+        let candidate = crate::domain::valueobject::catalog::AnalysisCandidate {
+            text: "猫".into(),
+            original_text: None,
+            language: None,
+            start_ms: 100,
+            end_ms: 200,
+            model: String::new(),
+            model_version: String::new(),
+            confidence: None,
+            evidence: None,
+        };
+        let (sender, receiver) = mpsc::channel();
+        let mut splitter = super::Splitter {
+            open: true,
+            task: Some(receiver),
+            ..Default::default()
+        };
+        sender
+            .send(Ok((vec![candidate], None, "input.wav".into(), 1.0)))
+            .expect("the analysis receiver should still be open");
+
+        splitter.poll(&Context::default());
+
+        assert!(splitter.active_view == super::SplitterView::Results);
+        assert_eq!(splitter.result_count(), Some(1));
+        assert_eq!(splitter.initial_ranges, [(100, 200)]);
+    }
+
     #[test]
     fn changing_source_discards_the_previous_selection() {
         let mut splitter = super::Splitter {
@@ -600,6 +854,13 @@ mod tests {
     }
 
     #[test]
+    fn range_slider_zooms_two_seconds_around_each_candidate() {
+        assert_eq!(super::slider_window(600.0, 300.0, 300.2), (298.0, 302.2));
+        assert_eq!(super::slider_window(10.0, 0.5, 0.7), (0.0, 2.7));
+        assert_eq!(super::slider_window(3.0, 1.0, 1.4), (0.0, 3.0));
+    }
+
+    #[test]
     fn range_columns_align_for_short_and_long_labels() {
         let context = eframe::egui::Context::default();
         super::theme::install(&context);
@@ -646,7 +907,14 @@ mod tests {
                                     ui.horizontal(|ui| {
                                         super::segment_label(ui, "example", false, 150.0);
                                         let (mut start, mut end) = (20.0, 40.0);
-                                        super::range_slider(ui, index, 100.0, &mut start, &mut end);
+                                        super::range_slider(
+                                            ui,
+                                            index,
+                                            100.0,
+                                            &mut start,
+                                            &mut end,
+                                            (20.0, 40.0),
+                                        );
                                         super::theme::icon_button(
                                             ui,
                                             super::theme::ActionIcon::Play,
@@ -692,17 +960,19 @@ mod tests {
     }
 
     #[test]
-    fn save_icon_does_not_change_range_and_handles_still_drag() {
+    fn save_button_preserves_range_and_slider_supports_drag_and_keyboard() {
         use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput};
         fn frame(
             ctx: &egui::Context,
             events: Vec<Event>,
             start: &mut f64,
             end: &mut f64,
-        ) -> (Pos2, Pos2, bool) {
+        ) -> (Pos2, Pos2, Pos2, bool, Option<bool>) {
             let mut save = Pos2::ZERO;
-            let mut handle = Pos2::ZERO;
+            let mut start_handle = Pos2::ZERO;
+            let mut end_handle = Pos2::ZERO;
             let mut clicked = false;
+            let mut selected_handle = None;
             let _ = ctx.run(
                 RawInput {
                     events,
@@ -713,13 +983,24 @@ mod tests {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
-                                let left = ui.next_widget_position();
-                                let width = (ui.available_width() - 130.0).max(20.0);
-                                handle = egui::pos2(
-                                    left.x + 7.0 + (width - 14.0) * (*start as f32 / 100.0),
-                                    left.y + 14.0,
-                                );
-                                super::range_slider(ui, 0, 100.0, start, end);
+                                let (_, slider_rect) =
+                                    super::range_slider(ui, 0, 100.0, start, end, (20.0, 40.0));
+                                let (view_start, view_end) =
+                                    super::slider_window(100.0, 20.0, 40.0);
+                                let left = slider_rect.left() + 7.0;
+                                let right = slider_rect.right() - 7.0;
+                                let handle_x = |value: f64| {
+                                    egui::lerp(
+                                        left..=right,
+                                        ((value - view_start) / (view_end - view_start)) as f32,
+                                    )
+                                };
+                                start_handle = egui::pos2(handle_x(*start), slider_rect.center().y);
+                                end_handle = egui::pos2(handle_x(*end), slider_rect.center().y);
+                                let handle_id = ui.id().with(("range_handle", 0));
+                                selected_handle = ctx
+                                    .data(|data| data.get_temp::<Option<bool>>(handle_id))
+                                    .flatten();
                                 super::theme::icon_button(
                                     ui,
                                     super::theme::ActionIcon::Play,
@@ -739,7 +1020,7 @@ mod tests {
                     });
                 },
             );
-            (save, handle, clicked)
+            (save, start_handle, end_handle, clicked, selected_handle)
         }
         fn pointer(pos: Pos2, pressed: bool) -> Event {
             Event::PointerButton {
@@ -752,14 +1033,15 @@ mod tests {
         let ctx = egui::Context::default();
         super::theme::install(&ctx);
         let (mut start, mut end) = (20.0, 40.0);
-        let (save, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        let (save, _, _, _, _) = frame(&ctx, vec![], &mut start, &mut end);
         frame(
             &ctx,
             vec![Event::PointerMoved(save), pointer(save, true)],
             &mut start,
             &mut end,
         );
-        let (_, handle, clicked) = frame(&ctx, vec![pointer(save, false)], &mut start, &mut end);
+        let (_, handle, _, clicked, _) =
+            frame(&ctx, vec![pointer(save, false)], &mut start, &mut end);
         assert!(clicked);
         assert_eq!((start, end), (20.0, 40.0));
         frame(
@@ -772,6 +1054,84 @@ mod tests {
         frame(&ctx, vec![Event::PointerMoved(moved)], &mut start, &mut end);
         frame(&ctx, vec![pointer(moved, false)], &mut start, &mut end);
         assert!(start > 20.0 && start < end);
+
+        let (_, start_handle, _, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        frame(
+            &ctx,
+            vec![
+                Event::PointerMoved(start_handle),
+                pointer(start_handle, true),
+            ],
+            &mut start,
+            &mut end,
+        );
+        let (_, _, _, _, selected_handle) = frame(
+            &ctx,
+            vec![pointer(start_handle, false)],
+            &mut start,
+            &mut end,
+        );
+        assert!(
+            selected_handle == Some(true),
+            "start handle should be selected"
+        );
+        let focus_before_start_adjustment = ctx.memory(|memory| memory.focused());
+        let before_arrow = start;
+        frame(
+            &ctx,
+            vec![Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: Some(egui::Key::ArrowRight),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::default(),
+            }],
+            &mut start,
+            &mut end,
+        );
+        assert!(
+            (start - before_arrow - 0.01).abs() < 1e-9,
+            "start changed from {before_arrow} to {start}"
+        );
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            focus_before_start_adjustment,
+            "right arrow should adjust the start handle without moving focus"
+        );
+
+        let (_, _, end_handle, _, _) = frame(&ctx, vec![], &mut start, &mut end);
+        frame(
+            &ctx,
+            vec![Event::PointerMoved(end_handle), pointer(end_handle, true)],
+            &mut start,
+            &mut end,
+        );
+        let (_, _, _, _, selected_handle) =
+            frame(&ctx, vec![pointer(end_handle, false)], &mut start, &mut end);
+        assert!(
+            selected_handle == Some(false),
+            "end handle should be selected"
+        );
+        let focus_before_end_adjustment = ctx.memory(|memory| memory.focused());
+        let before_end_arrow = end;
+        frame(
+            &ctx,
+            vec![Event::Key {
+                key: egui::Key::ArrowLeft,
+                physical_key: Some(egui::Key::ArrowLeft),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::default(),
+            }],
+            &mut start,
+            &mut end,
+        );
+        assert!((end - before_end_arrow + 0.01).abs() < 1e-9);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            focus_before_end_adjustment,
+            "left arrow should adjust the end handle without moving focus"
+        );
     }
 
     #[cfg(windows)]
