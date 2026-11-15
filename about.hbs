@@ -1,0 +1,14 @@
+# Third-party licenses (review required)
+
+Some generated entries contain placeholder copyright holders. Verify the upstream notices before distributing binaries.
+
+{{#each licenses}}
+## {{name}}
+
+{{#each used_by}}- {{crate.name}} {{crate.version}} ({{crate.repository}})
+{{/each}}
+```text
+{{{text}}}
+```
+
+{{/each}}
