@@ -231,19 +231,11 @@ impl Splitter {
                         });
                     }
                     if !self.segments.is_empty() {
-                        ui.label("文字起こし候補");
-                        ui.horizontal(|ui| {
-                            let has_selection = self.selected.is_some();
-                            ui.add_enabled_ui(has_selection, |ui| {
-                                if theme::button(ui, "再生", theme::ButtonKind::Normal).clicked() {
-                                    self.run_operation(None);
-                                }
-                                if theme::button(ui, "WAVに保存", theme::ButtonKind::Primary).clicked() {
-                                    let text = self.selected.and_then(|index| self.segments.get(index)).map(|segment| segment.text.clone()).unwrap_or_default();
-                                    self.run_operation(Some((root.to_owned(), text)));
-                                }
-                            });
-                        });
+                        ui.label("文字起こし結果");
+                        if theme::button(ui, "すべてまとめて保存", theme::ButtonKind::Primary).clicked() {
+                            self.save_all(root.to_owned());
+                        }
+                        let mut action = None;
                         egui::ScrollArea::vertical().id_salt("splitter_segments_scroll").max_height(180.0).show(ui, |ui| {
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
@@ -265,9 +257,19 @@ impl Splitter {
                                         self.start = start;
                                         self.end = end;
                                     }
+                                    if theme::icon_button(ui, theme::ActionIcon::Play, "再生", theme::ButtonKind::Normal).clicked() { action = Some((index, false)); }
+                                    if theme::icon_button(ui, theme::ActionIcon::Save, "WAVに保存", theme::ButtonKind::Normal).clicked() { action = Some((index, true)); }
                                 });
                             }
                         });
+                        if let Some((index, save)) = action {
+                            let segment = &self.segments[index];
+                            self.selected = Some(index);
+                            self.start = segment.start_ms as f64 / 1000.0;
+                            self.end = segment.end_ms as f64 / 1000.0;
+                            let output = save.then(|| (root.to_owned(), segment.text.clone()));
+                            self.run_operation(output);
+                        }
                     }
 
                 });
@@ -281,6 +283,35 @@ impl Splitter {
                     theme::state_message(ui, theme::State::Error, error);
                 }
             });
+    }
+    fn save_all(&mut self, root: PathBuf) {
+        let Some(input) = self.input.clone() else {
+            return;
+        };
+        let segments = self.segments.clone();
+        let (tx, rx) = mpsc::channel();
+        self.operation = Some(rx);
+        self.error = None;
+        self.saved = None;
+        std::thread::spawn(move || {
+            let mut last = None;
+            for (index, segment) in segments.iter().enumerate() {
+                match splitter::save_material(
+                    &input,
+                    &root,
+                    &segment.text,
+                    segment.start_ms as f64 / 1000.0,
+                    segment.end_ms as f64 / 1000.0,
+                ) {
+                    Ok(path) => last = Some(path),
+                    Err(error) => {
+                        let _ = tx.send(Err(format!("{}件保存後に失敗しました: {error}", index)));
+                        return;
+                    }
+                }
+            }
+            let _ = tx.send(Ok(last));
+        });
     }
     fn run_operation(&mut self, output: Option<(PathBuf, String)>) {
         let Some(input) = self.input.clone() else {
@@ -351,7 +382,7 @@ fn range_slider(
     start: &mut f64,
     end: &mut f64,
 ) -> bool {
-    let width = ui.available_width().max(20.0);
+    let width = (ui.available_width() - 90.0).max(20.0);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
     if duration <= 0.0 {

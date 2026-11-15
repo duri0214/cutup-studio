@@ -62,6 +62,8 @@ pub enum ActionIcon {
     Delete,
     Close,
     Ollama,
+    Play,
+    Save,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -821,6 +823,12 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
         }
         ActionIcon::Close => {
             egui::Image::new(egui::include_image!("../../assets/icons/lucide/x.svg"))
+        }
+        ActionIcon::Play => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/play.svg"))
+        }
+        ActionIcon::Save => {
+            egui::Image::new(egui::include_image!("../../assets/icons/lucide/save.svg"))
         }
         ActionIcon::Ollama => egui::Image::new(egui::include_image!(
             "../../assets/icons/ollama/ollama-logo.svg"
