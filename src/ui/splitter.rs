@@ -234,6 +234,9 @@ impl Splitter {
                         });
                     }
                     if !self.segments.is_empty() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
                         ui.label("文字起こし結果");
                         if theme::button(ui, "すべてまとめて保存", theme::ButtonKind::Primary).clicked() {
                             self.save_all(root.to_owned());
