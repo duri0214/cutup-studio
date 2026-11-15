@@ -825,20 +825,19 @@ impl StudioApp {
 
     fn show_candidate_pane(&mut self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
-            section_header(
-                ui,
-                "02 / CANDIDATES",
-                theme::State::Ready,
-                "02 / COMPOSITION GUIDE の候補",
-                0,
-            );
+            ui.horizontal(|ui| {
+                theme::pane_title(ui, "02 / CANDIDATES");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    theme::traffic_light(ui, theme::State::Ready, "02 / COMPOSITION GUIDE", 0);
+                });
+            });
             self.show_candidates(ui);
         });
     }
 
     fn show_info_pane(&self, ui: &mut Ui) {
         theme::panel().show(ui, |ui| {
-            theme::caption(ui, "INFO PANE");
+            theme::pane_title(ui, "INFO PANE");
             ui.add_space(theme::SPACE_SM);
             ui.label(theme::body_muted(
                 "素材の登録と、02 / COMPOSITION GUIDE の候補を表示します。",
@@ -1345,7 +1344,7 @@ impl eframe::App for StudioApp {
                         self.show_candidate_pane(ui);
                     } else if self.active_section == Section::Composition {
                         theme::panel().show(ui, |ui| {
-                            ui.label(theme::section_title("03 / COMPOSITION"));
+                            theme::pane_title(ui, "03 / COMPOSITION");
                             ui.label(theme::body(
                                 "構成の保存・読み込みと書き出しは左の 03 で操作します。",
                             ));

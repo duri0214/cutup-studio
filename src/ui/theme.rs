@@ -207,6 +207,21 @@ pub fn section_title(text: impl Into<String>) -> RichText {
     body(text).strong().color(TEXT)
 }
 
+pub fn pane_title(ui: &mut Ui, text: &str) {
+    ui.vertical(|ui| {
+        let response = ui.label(section_title(text).color(ACCENT));
+        let y = response.rect.bottom() + 4.0;
+        ui.painter().line_segment(
+            [
+                Pos2::new(response.rect.left(), y),
+                Pos2::new(response.rect.right(), y),
+            ],
+            Stroke::new(2.0_f32, ACCENT),
+        );
+        ui.add_space(8.0);
+    });
+}
+
 pub fn item_title(text: impl Into<String>) -> RichText {
     body(text).strong()
 }

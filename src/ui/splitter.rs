@@ -143,7 +143,7 @@ impl Splitter {
     pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings, root: &std::path::Path) {
         theme::panel().show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(theme::section_title("動画から素材を切り出す"));
+                    theme::pane_title(ui, "動画から素材を切り出す");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if theme::icon_button(ui, theme::ActionIcon::Close, "閉じる", theme::ButtonKind::Normal).clicked() {
                             self.open = false;
