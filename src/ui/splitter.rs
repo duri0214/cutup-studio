@@ -256,7 +256,7 @@ impl Splitter {
                     }
                 });
                 if busy {
-                    ui.label("処理中…");
+                    theme::progress_message(ui, "処理中…");
                 }
                 if let Some(error) = &self.error {
                     theme::state_message(ui, theme::State::Error, error);

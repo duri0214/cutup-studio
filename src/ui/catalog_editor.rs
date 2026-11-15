@@ -570,10 +570,7 @@ impl CatalogEditor {
             }
         }
         if self.analysis_task.is_some() {
-            ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(16.0).color(theme::ACCENT));
-                ui.label(theme::body("音声から情報を抽出中…"));
-            });
+            theme::progress_message(ui, "音声から情報を抽出中…");
             ui.label(theme::detail_muted(
                 "Ollama 実行中の中断は応答を待って反映されます。",
             ));

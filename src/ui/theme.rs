@@ -278,6 +278,13 @@ pub fn state_message(ui: &mut Ui, state: State, text: &str) {
     ui.label(detail(text).color(state_color(state)));
 }
 
+pub fn progress_message(ui: &mut Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new().size(16.0).color(ACCENT));
+        ui.label(body(text));
+    });
+}
+
 pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
     ui.painter()
