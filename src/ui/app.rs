@@ -708,23 +708,13 @@ impl StudioApp {
                 }
             });
             ui.add_space(theme::SPACE_XS);
-            let model = self.editor.as_ref().and_then(CatalogEditor::selected_ollama_model).map(str::to_owned);
-            let has_model = model.is_some();
-            let slot = self.active_slot.and_then(|index| self.plan.as_ref()?.slots.get(index)).map(|s| s.slot.clone());
-            if ui.add_enabled(model.is_some() && slot.is_some() && self.related_task.is_none(), egui::Button::new("Ollama で関連素材を探す")).clicked()
-                && let (Some(model), Some(slot)) = (model, slot) {
-                let (sender, receiver) = mpsc::channel();
-                self.related_task = Some(receiver);
-                self.status = "関連語を生成しています。従来の候補も利用できます。".into();
-                self.active_section = Section::Guide;
-                ui.ctx().request_repaint();
-                std::thread::spawn(move || {
-                    let result = ollama::related_terms(&model, &slot.query);
-                    let _ = sender.send((slot.id, slot.role, slot.query, result));
-                });
-            }
+            let has_model = self
+                .editor
+                .as_ref()
+                .and_then(CatalogEditor::selected_ollama_model)
+                .is_some();
             if self.related_task.is_some() {
-                theme::progress_message(ui, "関連語を生成しています…");
+                theme::progress_message(ui, &self.status);
             } else if !has_model {
                 ui.label(theme::detail_muted(
                     "関連素材を探すには、01 の設定で Ollama モデルを選んでください。",
@@ -737,6 +727,7 @@ impl StudioApp {
             let dragged_index = self.dragged_guide_index;
             let can_remove = self.guide_inputs.len() > 1;
             let mut populated_order = 0;
+            let mut related_input = None;
             for (index, guide_input) in self.guide_inputs.iter_mut().enumerate() {
                 let slot_index = if guide_input.query.trim().is_empty() {
                     None
@@ -766,6 +757,25 @@ impl StudioApp {
                         focused_guide = Some(index);
                         self.active_section = Section::Guide;
                         ui.ctx().request_repaint();
+                    }
+                    if !guide_input.query.trim().is_empty() {
+                        let can_search_related = has_model && self.related_task.is_none();
+                        if ui
+                            .add_enabled_ui(can_search_related, |ui| {
+                                theme::icon_button(
+                                    ui,
+                                    theme::ActionIcon::Ollama,
+                                    "このレイヤーの関連素材を探す",
+                                    theme::ButtonKind::Normal,
+                                )
+                            })
+                            .inner
+                            .clicked()
+                        {
+                            related_input = Some(index);
+                            focused_guide = Some(index);
+                            self.active_section = Section::Guide;
+                        }
                     }
                     if can_remove
                         && theme::icon_button(
@@ -829,6 +839,31 @@ impl StudioApp {
                 && let Some(slot_index) = active_slot_for_input(&self.guide_inputs, index)
             {
                 self.active_slot = Some(slot_index);
+            }
+            if let Some(index) = related_input
+                && let Some(slot_index) = active_slot_for_input(&self.guide_inputs, index)
+                && let Some(model) = self
+                    .editor
+                    .as_ref()
+                    .and_then(CatalogEditor::selected_ollama_model)
+                    .map(str::to_owned)
+                && let Some(slot) = self
+                    .plan
+                    .as_ref()
+                    .and_then(|plan| plan.slots.get(slot_index))
+                    .map(|slot| slot.slot.clone())
+            {
+                let (sender, receiver) = mpsc::channel();
+                self.related_task = Some(receiver);
+                self.status = format!(
+                    "「{}」の関連語を生成しています。従来の候補も利用できます。",
+                    slot.query
+                );
+                ui.ctx().request_repaint();
+                std::thread::spawn(move || {
+                    let result = ollama::related_terms(&model, &slot.query);
+                    let _ = sender.send((slot.id, slot.role, slot.query, result));
+                });
             }
         });
     }
