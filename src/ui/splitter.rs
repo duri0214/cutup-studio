@@ -262,13 +262,10 @@ impl Splitter {
                         }
                         let mut action = None;
                         egui::ScrollArea::vertical().id_salt(("splitter_segments_scroll", self.results_generation)).max_height(180.0).show(ui, |ui| {
+                            let label_width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
                             for (index, segment) in self.segments.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
-                                    let short: String = segment.text.chars().take(10).collect();
-                                    let label = if segment.text.chars().count() > 10 { format!("{short}…") } else { short };
-                                    let width = 150.0_f32.min((ui.available_width() * 0.4).max(40.0));
-                                    if ui.add_sized([width, 28.0], egui::Button::selectable(self.selected == Some(index), label))
-                                        .on_hover_text(&segment.text).clicked() {
+                                    if segment_label(ui, &segment.text, self.selected == Some(index), label_width).clicked() {
                                         self.selected = Some(index);
                                         self.start = segment.start_ms as f64 / 1000.0;
                                         self.end = segment.end_ms as f64 / 1000.0;
@@ -395,6 +392,14 @@ fn valid_segments(segments: Vec<AnalysisCandidate>, duration: f64) -> Vec<Analys
         result.push(segment);
     }
     result
+}
+
+fn segment_label(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) -> egui::Response {
+    ui.add_sized(
+        [width, 28.0],
+        egui::Button::selectable(selected, text).truncate(),
+    )
+    .on_hover_text(text)
 }
 
 fn range_slider(
@@ -540,6 +545,30 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "テッカマン");
         assert_eq!((segments[0].start_ms, segments[0].end_ms), (0, 900));
+    }
+
+    #[test]
+    fn range_columns_align_for_short_and_long_labels() {
+        let context = eframe::egui::Context::default();
+        super::theme::install(&context);
+        let mut left_edges = Vec::new();
+        let _ = context.run(eframe::egui::RawInput::default(), |ctx| {
+            eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(500.0);
+                let width = 150.0;
+                for text in [
+                    "短い",
+                    "とても長い文字起こしの文章を表示して幅が変わらないようにする",
+                ] {
+                    ui.horizontal(|ui| {
+                        super::segment_label(ui, text, false, width);
+                        left_edges.push(ui.next_widget_position().x);
+                    });
+                }
+            });
+        });
+        assert_eq!(left_edges.len(), 2);
+        assert_eq!(left_edges[0], left_edges[1]);
     }
 
     #[test]
