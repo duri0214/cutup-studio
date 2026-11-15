@@ -49,7 +49,7 @@ fn youtube_url(url: &str) -> Result<url::Url, String> {
         || parsed.password().is_some()
         || parsed.port().is_some()
     {
-        return Err("https の YouTube 動画 URL を入力してください。".into());
+        return Err("有効な YouTube の動画 URL を入力してください。".into());
     }
     let id = if parsed.host_str() == Some("youtu.be") {
         parsed.path().strip_prefix('/').map(str::to_owned)
@@ -276,6 +276,10 @@ mod tests {
         assert!(youtube_url("https://www.youtube.com/watch?v=BaW_jenozKc").is_ok());
         assert!(youtube_url("https://youtu.be/BaW_jenozKc").is_ok());
         assert!(youtube_url("https://www.youtube.com/shorts/BaW_jenozKc").is_ok());
+        assert_eq!(
+            youtube_url("https://example.com/video").unwrap_err(),
+            "有効な YouTube の動画 URL を入力してください。"
+        );
         assert!(youtube_url("https://youtube.com.evil.test/watch?v=BaW_jenozKc").is_err());
         assert!(youtube_url("https://www.youtube.com/playlist?list=abc").is_err());
         assert!(youtube_url("https://www.youtube.com/watch?v=x").is_err());
