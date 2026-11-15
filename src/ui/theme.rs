@@ -705,11 +705,10 @@ pub fn action_button(
     let enabled = ui.is_enabled();
     let text_color = button_text_color(kind, enabled);
     let font = FontId::proportional(BUTTON_TEXT_SIZE);
-    let text_width = ui
+    let text_galley = ui
         .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), text_color)
-        .size()
-        .x;
+        .layout_no_wrap(label.to_owned(), font.clone(), text_color);
+    let text_width = text_galley.size().x;
     let icon_size = Vec2::splat(16.0);
     let content_gap = SPACE_XS;
     let content_width = icon_size.x + content_gap + text_width;
@@ -739,11 +738,11 @@ pub fn action_button(
         icon_size,
         text_color,
     );
-    ui.painter().text(
-        Pos2::new(content_left + icon_size.x + content_gap, center_y),
-        Align2::LEFT_CENTER,
-        label,
-        font,
+    // Center the visible glyphs, since the font line box is not optically centered.
+    let text_origin_y = center_y - text_galley.mesh_bounds.center().y;
+    ui.painter().galley(
+        Pos2::new(content_left + icon_size.x + content_gap, text_origin_y),
+        text_galley,
         text_color,
     );
     response
