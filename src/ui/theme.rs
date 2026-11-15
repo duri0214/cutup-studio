@@ -211,7 +211,12 @@ pub fn pane_title(ui: &mut Ui, text: &str) {
     let vertical_padding =
         ((INPUT_HEIGHT - ui.text_style_height(&egui::TextStyle::Body)) / 2.0).round() as i8;
     let title = Frame::new()
-        .inner_margin(egui::Margin::symmetric(0, vertical_padding))
+        .inner_margin(egui::Margin {
+            left: SPACE_LG as i8,
+            right: 0,
+            top: vertical_padding,
+            bottom: vertical_padding,
+        })
         .show(ui, |ui| ui.label(section_title(text).color(ACCENT)));
     let rect = title.response.rect;
     let y = rect.bottom() - 1.0;
