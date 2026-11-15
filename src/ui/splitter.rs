@@ -105,23 +105,26 @@ impl Splitter {
                 ui.add_enabled_ui(!busy, |ui| {
                     ui.label("YouTube の動画 URL");
                     ui.label("URL の音声を一時取得して解析します。yt-dlp が必要です。");
-                    if ui.text_edit_singleline(&mut self.url).changed() {
-                        self.input = None;
-                        self.downloaded = None;
-                        self.segments.clear();
-                        self.selected = None;
-                        self.error = None;
-                    }
-                    if theme::button(ui, "動画を選ぶ", theme::ButtonKind::Normal).clicked()
-                        && let Some(path) = rfd::FileDialog::new().pick_file()
-                    {
-                        self.input = Some(path);
-                        self.url.clear();
-                        self.downloaded = None;
-                        self.segments.clear();
-                        self.selected = None;
-                        self.error = None;
-                    }
+                    ui.horizontal_wrapped(|ui| {
+                        let width = (ui.available_width() - 200.0).max(120.0);
+                        if theme::text_input(ui, &mut self.url, "YouTube の動画 URL", width).changed() {
+                            self.input = None;
+                            self.downloaded = None;
+                            self.segments.clear();
+                            self.selected = None;
+                            self.error = None;
+                        }
+                        if theme::button(ui, "ローカル動画を選ぶ", theme::ButtonKind::Normal).clicked()
+                            && let Some(path) = rfd::FileDialog::new().pick_file()
+                        {
+                            self.input = Some(path);
+                            self.url.clear();
+                            self.downloaded = None;
+                            self.segments.clear();
+                            self.selected = None;
+                            self.error = None;
+                        }
+                    });
                     if let Some(path) = &self.input
                         && self.url.is_empty()
                     {
@@ -130,7 +133,7 @@ impl Splitter {
                     if ui
                         .add_enabled(
                             self.input.is_some() || !self.url.trim().is_empty(),
-                            egui::Button::new("台詞を解析"),
+                            egui::Button::new("音声を抽出・文字起こし"),
                         )
                         .clicked()
                     {
@@ -158,7 +161,7 @@ impl Splitter {
                                 let input = if let Some(dir) = &downloaded {
                                     dir.path().join("input.wav")
                                 } else {
-                                    local_input.ok_or("動画を選んでください。")?
+                                    local_input.ok_or("ローカル動画を選んでください。")?
                                 };
                                 let hash = local_stt::fingerprint(&input, &cancel)
                                     .map_err(|e| e.to_string())?;
