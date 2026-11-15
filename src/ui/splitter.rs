@@ -102,9 +102,11 @@ impl Splitter {
         theme::panel().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(theme::section_title("動画から素材を切り出す"));
-                    if theme::button(ui, "閉じる", theme::ButtonKind::Normal).clicked() {
-                        self.open = false;
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::icon_button(ui, theme::ActionIcon::Close, "閉じる", theme::ButtonKind::Normal).clicked() {
+                            self.open = false;
+                        }
+                    });
                 });
                 let busy = self.task.is_some() || self.operation.is_some();
                 ui.label("必要なツール（ファイルの有無）");
