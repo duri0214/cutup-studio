@@ -38,7 +38,7 @@ enum InputSource {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum SplitterTab {
+enum SplitterView {
     #[default]
     Input,
     Results,
@@ -47,7 +47,7 @@ enum SplitterTab {
 #[derive(Default)]
 pub(super) struct Splitter {
     pub open: bool,
-    active_tab: SplitterTab,
+    active_view: SplitterView,
     source: InputSource,
     input: Option<PathBuf>,
     url: String,
@@ -105,7 +105,7 @@ impl Splitter {
                     self.segments = valid_segments(segments, duration);
                     self.reset_result_scroll = true;
                     self.result_ready = true;
-                    self.active_tab = SplitterTab::Results;
+                    self.active_view = SplitterView::Results;
                     self.duration = duration;
                     self.input = Some(input);
                     self.downloaded = downloaded;
@@ -160,17 +160,18 @@ impl Splitter {
             ui.horizontal(|ui| {
                 theme::pane_title(ui, "動画から素材を切り出す");
                 ui.add_space(theme::SPACE_XS);
-                if theme::tab(ui, "入力", self.active_tab == SplitterTab::Input, 52.0).clicked() {
-                    self.active_tab = SplitterTab::Input;
-                }
-                if ui
-                    .add_enabled_ui(busy || self.result_ready, |ui| {
-                        theme::tab(ui, "結果", self.active_tab == SplitterTab::Results, 52.0)
-                    })
-                    .inner
-                    .clicked()
-                {
-                    self.active_tab = SplitterTab::Results;
+                if self.result_ready || self.active_view == SplitterView::Results {
+                    let label = if self.active_view == SplitterView::Results {
+                        "入力へ戻る"
+                    } else {
+                        "結果を見る"
+                    };
+                    if theme::button(ui, label, theme::ButtonKind::Normal).clicked() {
+                        self.active_view = match self.active_view {
+                            SplitterView::Input => SplitterView::Results,
+                            SplitterView::Results => SplitterView::Input,
+                        };
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if theme::icon_button(
@@ -186,7 +187,7 @@ impl Splitter {
                 });
             });
 
-            if self.active_tab == SplitterTab::Input {
+            if self.active_view == SplitterView::Input {
                 let previous_candidate_width = settings.candidate_width;
                 ui.label("必要なツール（ファイルの有無）");
                 egui::Grid::new("splitter_tool_status").show(ui, |ui| {
@@ -331,7 +332,7 @@ impl Splitter {
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 } else if self.result_ready {
-                    ui.label("候補がありません。入力タブから別の動画を選んでください。");
+                    ui.label("候補がありません。「入力へ戻る」から別の動画を選んでください。");
                 } else {
                     ui.label("文字起こし後に、候補をここに表示します。");
                 }
@@ -624,7 +625,7 @@ fn play(path: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn completed_transcription_opens_the_results_tab() {
+    fn completed_transcription_selects_the_results_view() {
         use eframe::egui::Context;
         use std::sync::mpsc;
 
@@ -640,7 +641,7 @@ mod tests {
 
         splitter.poll(&Context::default());
 
-        assert!(splitter.active_tab == super::SplitterTab::Results);
+        assert!(splitter.active_view == super::SplitterView::Results);
         assert_eq!(splitter.result_count(), Some(0));
     }
 
