@@ -94,8 +94,15 @@ FFmpeg は別途導入します。導入方法は [ローカル AI のセット�
 
 02 で各素材を選び、03 の「WAVを書き出す」を押して保存先を指定します。画面に表示中の全スロットが対象で、構成の「保存」は書き出しに不要です。未保存の構成があるままアプリを閉じると、保存・破棄・キャンセルを選べます。音声を 48 kHz・ステレオの PCM WAV に変換してファイル単位で順番に連結します。区間指定は未対応です。音声がない素材や壊れた素材はエラーになります。既存の書き出し先は上書きできます。使用中の素材は書き出し先に指定できません。
 
-## 第三者ライセンス
+## 第三者ライセンスと Windows 向け配布
 
-Windows x86-64 向けの依存ライブラリ、組み込みフォント、アイコンの情報は [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) にまとめています。現在、生成元に著作権者が未記入の項目があるため、実行ファイルに添えて配布する前に各項目の原本を確認する必要があります。
+Windows x86-64 向けの依存ライブラリ、組み込みフォント、アイコンの情報は [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) にまとめています。FFmpeg とその他の外部ツールは利用者が別途用意します。
 
-依存関係を更新した後は cargo-about 0.8.4 を用意し、リポジトリのルートで PowerShell の `./scripts/generate-licenses.ps1` を実行して再生成します。生成には依存クレートの取得とライセンス情報の確認のため通信が必要です。生成後に差分と著作権表示・NOTICE を確認してください。実行ファイルの配布時は `LICENSE` と確認済みの `THIRD_PARTY_LICENSES.md` を添えます。FFmpeg とその他の外部ツールは利用者が別途用意します。
+配布用フォルダは、Rust の Windows x86-64 ツールチェーンを用意し、リポジトリのルートで次を実行して作成します。cargo-about は初回だけ導入します。出力先が既に存在する場合は停止します。
+
+```powershell
+cargo install cargo-about --version 0.8.4 --locked
+./scripts/package-windows.ps1
+```
+
+`dist/cutup-studio-windows/` に実行ファイル、DEMO、`LICENSE`、`THIRD_PARTY_LICENSES.md` とセットアップ案内をまとめます。ライセンスを表示するには、そのフォルダ内の `THIRD_PARTY_LICENSES.md` を開いてください。依存関係を更新した場合、`./scripts/generate-licenses.ps1` で一覧を再生成し、差分と追加された依存の著作権表示・NOTICE を確認してからコミットします。収集元にライセンス本文がないものは `licenses/upstream-notices.json` の該当バージョンと上流原本を確認します。著作権者が未記入の MIT 項目が新たに現れた場合は生成を停止します。生成時は依存クレートとライセンス情報の取得のため通信が必要です。
