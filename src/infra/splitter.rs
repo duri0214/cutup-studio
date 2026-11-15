@@ -127,6 +127,21 @@ pub fn cut(input: &Path, output: &Path, start: f64, end: f64) -> Result<(), Stri
         return Err("元動画を保存先に指定できません。".into());
     }
     let parent = output.parent().ok_or("保存先が不正です。")?;
+    let temp = render(input, parent, start, end)?;
+    temp.persist(output)
+        .map_err(|e| format!("保存できません: {}", e.error))?;
+    Ok(())
+}
+
+fn render(
+    input: &Path,
+    parent: &Path,
+    start: f64,
+    end: f64,
+) -> Result<tempfile::NamedTempFile, String> {
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
+        return Err("開始は0以上、終了は開始より後にしてください。".into());
+    }
     let temp = tempfile::Builder::new()
         .suffix(".wav")
         .tempfile_in(parent)
@@ -164,14 +179,98 @@ pub fn cut(input: &Path, output: &Path, start: f64, end: f64) -> Result<(), Stri
     if temp.as_file().metadata().map_err(|e| e.to_string())?.len() <= 78 {
         return Err("指定した範囲に音声がありません。時刻を確認してください。".into());
     }
-    temp.persist(output)
-        .map_err(|e| format!("保存できません: {}", e.error))?;
-    Ok(())
+    Ok(temp)
+}
+
+fn material_stem(text: &str) -> String {
+    let clean: String = text
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+        .take(48)
+        .collect();
+    let clean = clean.trim_matches(|c: char| c.is_whitespace() || c == '.');
+    let reserved = clean
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    if clean.is_empty()
+        || matches!(
+            reserved.as_str(),
+            "CON"
+                | "PRN"
+                | "AUX"
+                | "NUL"
+                | "COM1"
+                | "COM2"
+                | "COM3"
+                | "COM4"
+                | "COM5"
+                | "COM6"
+                | "COM7"
+                | "COM8"
+                | "COM9"
+                | "LPT1"
+                | "LPT2"
+                | "LPT3"
+                | "LPT4"
+                | "LPT5"
+                | "LPT6"
+                | "LPT7"
+                | "LPT8"
+                | "LPT9"
+        )
+    {
+        return "音声".into();
+    }
+    clean.into()
+}
+
+pub fn save_material(
+    input: &Path,
+    root: &Path,
+    text: &str,
+    start: f64,
+    end: f64,
+) -> Result<std::path::PathBuf, String> {
+    let materials = root.join("materials");
+    if !materials.is_dir() {
+        return Err("基準フォルダの materials フォルダが見つかりません。".into());
+    }
+    let mut temp = render(input, &materials, start, end)?;
+    let stem = material_stem(text);
+    for index in 1..=10000 {
+        let name = if index == 1 {
+            format!("{stem}.wav")
+        } else {
+            format!("{stem}-{index}.wav")
+        };
+        let output = materials.join(name);
+        match temp.persist_noclobber(&output) {
+            Ok(_) => return Ok(output),
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                temp = error.file
+            }
+            Err(error) => return Err(format!("保存できません: {}", error.error)),
+        }
+    }
+    Err("同じ名前の素材が多すぎます。".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn material_names_are_safe_and_readable() {
+        assert_eq!(material_stem("  女性も？/ついふみ…  "), "女性も？ついふみ…");
+        assert_eq!(material_stem("../"), "音声");
+        assert_eq!(material_stem("CON.txt"), "音声");
+        assert_eq!(material_stem("CON .txt"), "音声");
+        assert_eq!(material_stem(&"あ".repeat(60)).chars().count(), 48);
+    }
     #[test]
     fn accepts_only_youtube_video_urls() {
         assert!(youtube_url("https://www.youtube.com/watch?v=BaW_jenozKc").is_ok());
@@ -215,6 +314,11 @@ mod tests {
         assert!(cut(&input, &dir.path().join("out.wav"), 2.0, 1.0).is_err());
         assert!(cut(&input, &input, 0.0, 1.0).is_err());
         assert_eq!(std::fs::read(input).unwrap(), b"original");
+        assert!(
+            save_material(Path::new("unused"), dir.path(), "台詞", 0.0, 1.0)
+                .unwrap_err()
+                .contains("materials")
+        );
     }
 
     #[test]
@@ -230,5 +334,11 @@ mod tests {
         let missing = dir.path().join("empty.wav");
         assert!(cut(&input, &missing, 9999.0, 10000.0).is_err());
         assert!(!missing.exists());
+        std::fs::create_dir(dir.path().join("materials")).unwrap();
+        let existing = dir.path().join("materials").join("テッカマン.wav");
+        std::fs::write(&existing, b"original").unwrap();
+        let saved = save_material(&input, dir.path(), "テッカマン", 0.0, 0.2).unwrap();
+        assert!(saved.ends_with("テッカマン-2.wav"));
+        assert_eq!(std::fs::read(existing).unwrap(), b"original");
     }
 }

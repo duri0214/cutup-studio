@@ -50,11 +50,15 @@ pub(super) struct Splitter {
     start: f64,
     end: f64,
     task: Option<AnalysisTask>,
-    operation: Option<Receiver<Result<(), String>>>,
+    operation: Option<Receiver<Result<Option<PathBuf>, String>>>,
+    saved: Option<PathBuf>,
     error: Option<String>,
 }
 
 impl Splitter {
+    pub fn is_busy(&self) -> bool {
+        self.task.is_some() || self.operation.is_some()
+    }
     fn set_source(&mut self, source: InputSource) {
         if self.source != source {
             self.source = source;
@@ -64,6 +68,7 @@ impl Splitter {
             self.segments.clear();
             self.selected = None;
             self.error = None;
+            self.saved = None;
         }
     }
     pub fn error(&self) -> Option<&str> {
@@ -104,7 +109,14 @@ impl Splitter {
         if let Some(task) = &self.operation {
             match task.try_recv() {
                 Ok(result) => {
-                    self.error = result.err();
+                    match result {
+                        Ok(path) => {
+                            if path.is_some() {
+                                self.saved = path;
+                            }
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
                     self.operation = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -117,7 +129,7 @@ impl Splitter {
             }
         }
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings) {
+    pub fn show(&mut self, ui: &mut egui::Ui, settings: &EditorSettings, root: &std::path::Path) {
         theme::panel().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(theme::section_title("動画から素材を切り出す"));
@@ -163,6 +175,7 @@ impl Splitter {
                                 self.segments.clear();
                                 self.selected = None;
                                 self.error = None;
+                                self.saved = None;
                             }
                         }
                         InputSource::Local => {
@@ -173,6 +186,7 @@ impl Splitter {
                                 self.segments.clear();
                                 self.selected = None;
                                 self.error = None;
+                                self.saved = None;
                             }
                             if let Some(path) = &self.input {
                                 ui.label(path.display().to_string());
@@ -272,13 +286,9 @@ impl Splitter {
                             if theme::button(ui, "再生", theme::ButtonKind::Normal).clicked() {
                                 self.run_operation(None);
                             }
-                            if theme::button(ui, "WAVに保存", theme::ButtonKind::Primary).clicked()
-                                && let Some(path) = rfd::FileDialog::new()
-                                    .add_filter("WAV", &["wav"])
-                                    .set_file_name("material.wav")
-                                    .save_file()
-                            {
-                                self.run_operation(Some(path));
+                            if theme::button(ui, "WAVに保存", theme::ButtonKind::Primary).clicked() {
+                                let text = self.selected.and_then(|index| self.segments.get(index)).map(|segment| segment.text.clone()).unwrap_or_default();
+                                self.run_operation(Some((root.to_owned(), text)));
                             }
                         });
                     }
@@ -286,12 +296,15 @@ impl Splitter {
                 if busy {
                     theme::progress_message(ui, "処理中…");
                 }
+                if let Some(path) = &self.saved {
+                    ui.label(format!("保存先: {}。カタログに反映するには OPEN で基準フォルダを開き直してください。", path.display()));
+                }
                 if let Some(error) = &self.error {
                     theme::state_message(ui, theme::State::Error, error);
                 }
             });
     }
-    fn run_operation(&mut self, output: Option<PathBuf>) {
+    fn run_operation(&mut self, output: Option<(PathBuf, String)>) {
         let Some(input) = self.input.clone() else {
             return;
         };
@@ -308,16 +321,17 @@ impl Splitter {
         let (tx, rx) = mpsc::channel();
         self.operation = Some(rx);
         self.error = None;
+        self.saved = None;
         std::thread::spawn(move || {
-            let result = if let Some(output) = output {
-                splitter::cut(&input, &output, start, end)
+            let result = if let Some((root, text)) = output {
+                splitter::save_material(&input, &root, &text, start, end).map(Some)
             } else {
                 tempfile::tempdir()
                     .map_err(|e| e.to_string())
                     .and_then(|dir| {
                         let wav = dir.path().join("preview.wav");
                         splitter::cut(&input, &wav, start, end)?;
-                        play(&wav)
+                        play(&wav).map(|()| None)
                     })
             };
             let _ = tx.send(result);

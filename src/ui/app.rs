@@ -123,6 +123,9 @@ impl StudioApp {
     }
 
     fn clear_active_catalog(&mut self) {
+        if !self.splitter.is_busy() {
+            self.splitter = super::splitter::Splitter::default();
+        }
         if let Some(editor) = &self.editor {
             self.editor_settings = editor.settings();
         }
@@ -549,75 +552,88 @@ impl StudioApp {
                 "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
             ));
             ui.add_space(theme::SPACE_XS);
-            ui.add_enabled_ui(self.catalog_task.is_none(), |ui| {
-                if theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal).clicked()
-                {
-                    self.splitter.open = true;
-                    self.active_section = Section::Catalog;
-                }
-                ui.horizontal(|ui| {
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::New,
-                        "NEW",
-                        theme::ButtonKind::Normal,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
+            if self.catalog.is_none() {
+                ui.label(theme::detail_muted(
+                    "素材を切り出すには、先に NEW または OPEN で基準フォルダを選んでください。",
+                ));
+            }
+            ui.add_enabled_ui(
+                self.catalog_task.is_none() && !self.splitter.is_busy(),
+                |ui| {
+                    if ui
+                        .add_enabled_ui(self.catalog.is_some(), |ui| {
+                            theme::button(ui, "動画から素材を切り出す", theme::ButtonKind::Normal)
+                        })
+                        .inner
+                        .clicked()
                     {
-                        self.create_catalog(ui.ctx());
+                        self.splitter.open = true;
+                        self.active_section = Section::Catalog;
                     }
-                    if theme::action_button(
-                        ui,
-                        theme::ActionIcon::Open,
-                        "OPEN",
-                        theme::ButtonKind::Normal,
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        self.open_catalog(ui.ctx());
-                    }
-                    if theme::toggle_button(
-                        ui,
-                        "DEMO",
-                        self.is_demo_catalog(),
-                        Vec2::new(106.0, 32.0),
-                    )
-                    .clicked()
-                    {
-                        if self.is_demo_catalog() {
-                            self.clear_active_catalog();
-                            self.catalog_task = None;
-                            self.status =
-                                "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
-                                    .into();
-                        } else {
-                            self.use_demo_catalog(ui.ctx());
+                    ui.horizontal(|ui| {
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::New,
+                            "NEW",
+                            theme::ButtonKind::Normal,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.create_catalog(ui.ctx());
                         }
+                        if theme::action_button(
+                            ui,
+                            theme::ActionIcon::Open,
+                            "OPEN",
+                            theme::ButtonKind::Normal,
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            self.open_catalog(ui.ctx());
+                        }
+                        if theme::toggle_button(
+                            ui,
+                            "DEMO",
+                            self.is_demo_catalog(),
+                            Vec2::new(106.0, 32.0),
+                        )
+                        .clicked()
+                        {
+                            if self.is_demo_catalog() {
+                                self.clear_active_catalog();
+                                self.catalog_task = None;
+                                self.status =
+                                    "NO CATALOG — NEW または OPEN で基準フォルダを選んでください。"
+                                        .into();
+                            } else {
+                                self.use_demo_catalog(ui.ctx());
+                            }
+                        }
+                    });
+                    if let Some(editor) = &mut self.editor {
+                        let total = editor.count();
+                        ui.label(theme::body(format!("素材ファイル: {total} 件")));
                     }
-                });
-                if let Some(editor) = &mut self.editor {
-                    let total = editor.count();
-                    ui.label(theme::body(format!("素材ファイル: {total} 件")));
-                }
-                let can_open_editor = self
-                    .editor
-                    .as_ref()
-                    .is_some_and(|editor| editor.count() > 0 && !editor.open);
-                if ui
-                    .add_enabled_ui(can_open_editor, |ui| {
-                        theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
-                    })
-                    .inner
-                    .clicked()
-                    && let Some(editor) = &mut self.editor
-                {
-                    editor.open = true;
-                    self.active_section = Section::Catalog;
-                    self.splitter.open = false;
-                }
-            });
+                    let can_open_editor = self
+                        .editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.count() > 0 && !editor.open);
+                    if ui
+                        .add_enabled_ui(can_open_editor, |ui| {
+                            theme::button(ui, "素材の情報を登録", theme::ButtonKind::Primary)
+                        })
+                        .inner
+                        .clicked()
+                        && let Some(editor) = &mut self.editor
+                    {
+                        editor.open = true;
+                        self.active_section = Section::Catalog;
+                        self.splitter.open = false;
+                    }
+                },
+            );
             if let Some(catalog) = &self.catalog {
                 ui.horizontal(|ui| {
                     ui.label(theme::caption_text(format!(
@@ -1259,8 +1275,15 @@ impl eframe::App for StudioApp {
             .frame(theme::content_frame())
             .show(context, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.active_section == Section::Catalog && self.splitter.open {
-                        self.splitter.show(ui, &settings);
+                    if self.active_section == Section::Catalog
+                        && self.splitter.open
+                        && let Some(catalog) = &self.catalog
+                    {
+                        self.splitter.show(
+                            ui,
+                            &settings,
+                            std::path::Path::new(&catalog.material_root),
+                        );
                     } else if self.active_section == Section::Catalog && registering {
                         if let Some(editor) = &mut self.editor {
                             let previous_message =
