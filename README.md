@@ -98,10 +98,6 @@ FFmpeg は別途導入します。導入方法は [ローカル AI のセット�
 
 Windows x86-64 向けの依存ライブラリ、組み込みフォント、アイコンの情報は [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) にまとめています。FFmpeg とその他の外部ツールは利用者が別途用意します。
 
-配布用フォルダは、Rust の Windows x86-64 ツールチェーンを用意し、リポジトリのルートで次を実行して作成します。出力先が既に存在する場合は停止します。
+Windows x86-64 向けに `cargo build --release --locked` でビルドし、配布フォルダに `target/release/cutup-studio.exe`、`LICENSE`、`THIRD_PARTY_LICENSES.md` を置きます。DEMO を使う場合は、同じフォルダに `demo/README.md` と `demo/materials/` の Git 管理されている WAV ファイルを置きます。利用者が作ったファイルや SQLite は含めません。
 
-```powershell
-./scripts/package-windows.ps1
-```
-
-`dist/cutup-studio-windows/` に実行ファイル、DEMO、`LICENSE`、`THIRD_PARTY_LICENSES.md` とセットアップ案内をまとめます。ライセンスを表示するには、そのフォルダ内の `THIRD_PARTY_LICENSES.md` を開いてください。依存ライブラリを更新するときは、追加・変更されたライセンスと著作権表示を確認し、一覧も更新してください。
+依存ライブラリを更新するときは、追加・変更されたライセンスと著作権表示を確認し、一覧も更新してください。
