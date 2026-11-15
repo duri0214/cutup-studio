@@ -54,6 +54,7 @@ pub(super) struct Splitter {
     task: Option<AnalysisTask>,
     operation: Option<Receiver<Result<Option<PathBuf>, String>>>,
     saved: Option<PathBuf>,
+    rescan_pending: bool,
     error: Option<String>,
 }
 
@@ -76,6 +77,12 @@ impl Splitter {
     }
     pub fn result_count(&self) -> Option<usize> {
         (self.open && self.result_ready && !self.is_busy()).then_some(self.segments.len())
+    }
+    pub fn take_rescan_pending(&mut self) -> bool {
+        std::mem::take(&mut self.rescan_pending)
+    }
+    pub fn rescan_failed(&mut self) {
+        self.saved = None;
     }
     pub fn saved_path(&self) -> Option<&std::path::Path> {
         self.open.then_some(self.saved.as_deref()).flatten()
@@ -116,6 +123,7 @@ impl Splitter {
                         Ok(path) => {
                             if path.is_some() {
                                 self.saved = path;
+                                self.rescan_pending = true;
                             }
                         }
                         Err(error) => self.error = Some(error),

@@ -1090,6 +1090,11 @@ impl CatalogEditor {
         Ok(())
     }
 
+    pub(super) fn rescan(&mut self) -> Result<(), CatalogError> {
+        self.store.rescan()?;
+        self.refresh()
+    }
+
     fn refresh(&mut self) -> Result<(), CatalogError> {
         self.materials = self.store.materials()?;
         self.stored_materials = self.store.search(&SearchFilter {
