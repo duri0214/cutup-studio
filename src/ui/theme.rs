@@ -51,6 +51,8 @@ pub const CAPTION_TEXT_SIZE: f32 = 10.0;
 pub const BRAND_TEXT_SIZE: f32 = 25.0;
 pub const BUTTON_TEXT_SIZE: f32 = 12.0;
 pub const TAB_TEXT_SIZE: f32 = 12.0;
+const NEW_ICON_VERTICAL_NUDGE: f32 = 2.0;
+const DEMO_CONTENT_VERTICAL_NUDGE: f32 = 2.5;
 pub const INPUT_HEIGHT: f32 = 30.0;
 pub const FORM_LABEL_WIDTH: f32 = 90.0;
 pub const SUGGESTION_LIST_HEIGHT: f32 = 220.0;
@@ -732,7 +734,12 @@ pub fn action_button(
     let content_left = response.rect.center().x - content_width * 0.5;
     let center_y = response.rect.center().y;
     // The folder-plus artwork appears top-heavy beside the text at the geometric center.
-    let icon_center_y = center_y + if icon == ActionIcon::New { 1.5 } else { 0.0 };
+    let icon_center_y = center_y
+        + if icon == ActionIcon::New {
+            NEW_ICON_VERTICAL_NUDGE
+        } else {
+            0.0
+        };
     paint_action_icon(
         ui,
         icon,
@@ -809,15 +816,16 @@ pub fn toggle_button(ui: &mut Ui, label: &str, on: bool, size: Vec2) -> Response
     } else {
         MUTED
     };
+    let content_center_y = rect.center().y + DEMO_CONTENT_VERTICAL_NUDGE;
     ui.painter().text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Pos2::new(rect.left() + 10.0, content_center_y),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(BUTTON_TEXT_SIZE),
         text_color,
     );
     let track = egui::Rect::from_center_size(
-        Pos2::new(rect.right() - 24.0, rect.center().y),
+        Pos2::new(rect.right() - 24.0, content_center_y),
         Vec2::new(28.0, 16.0),
     );
     ui.painter().rect_filled(
