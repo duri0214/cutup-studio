@@ -341,6 +341,7 @@ impl Splitter {
                 ui.add_enabled_ui(!busy, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("文字起こし結果");
+                        ui.label(theme::detail_muted("各候補の前後2秒を拡大表示"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
                                 self.save_all(root.to_owned());
@@ -520,6 +521,17 @@ fn results_scroll_area(reset: bool) -> egui::ScrollArea {
     }
 }
 
+fn slider_window(duration: f64, start: f64, end: f64) -> (f64, f64) {
+    const CONTEXT_SECONDS: f64 = 2.0;
+    let view_start = (start - CONTEXT_SECONDS).clamp(0.0, duration);
+    let view_end = (end + CONTEXT_SECONDS).clamp(0.0, duration);
+    if view_end > view_start {
+        (view_start, view_end)
+    } else {
+        (0.0, duration)
+    }
+}
+
 fn segment_label(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) -> egui::Response {
     ui.add_sized(
         [width, 28.0],
@@ -544,7 +556,27 @@ fn range_slider(
     }
     let left = rect.left() + 7.0;
     let right = rect.right() - 7.0;
-    let x = |t: f64| egui::lerp(left..=right, (t / duration).clamp(0.0, 1.0) as f32);
+    let initial_window = slider_window(duration, *start, *end);
+    let view_id = ui.id().with(("range_view", index));
+    if response.drag_started() {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(view_id, [initial_window.0, initial_window.1]));
+    }
+    let (view_start, view_end) = if response.dragged() {
+        ui.ctx()
+            .data(|data| data.get_temp::<[f64; 2]>(view_id))
+            .map(|window| (window[0], window[1]))
+            .unwrap_or(initial_window)
+    } else {
+        initial_window
+    };
+    let view_duration = (view_end - view_start).max(f64::EPSILON);
+    let x = |time: f64| {
+        egui::lerp(
+            left..=right,
+            ((time - view_start) / view_duration).clamp(0.0, 1.0) as f32,
+        )
+    };
     let start_x = x(*start);
     let end_x = x(*end);
     let id = ui.id().with(("range_handle", index));
@@ -569,7 +601,8 @@ fn range_slider(
             .data(|data| data.get_temp::<Option<bool>>(id))
             .flatten()
     {
-        let value = ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * duration;
+        let value =
+            view_start + ((pos.x - left) / (right - left)).clamp(0.0, 1.0) as f64 * view_duration;
         if is_start {
             *start = value.min((*end - 0.001).max(0.0));
         } else {
@@ -595,8 +628,8 @@ fn range_slider(
         );
     }
     response.on_hover_text(format!(
-        "開始 {:.2} 秒 / 終了 {:.2} 秒。両端をドラッグ",
-        *start, *end
+        "前後2秒を拡大表示（{view_start:.2}～{view_end:.2}秒）。開始 {:.2} 秒 / 終了 {:.2} 秒。両端をドラッグ",
+        *start, *end,
     ));
     changed
 }
@@ -728,6 +761,13 @@ mod tests {
     }
 
     #[test]
+    fn range_slider_zooms_two_seconds_around_each_candidate() {
+        assert_eq!(super::slider_window(600.0, 300.0, 300.2), (298.0, 302.2));
+        assert_eq!(super::slider_window(10.0, 0.5, 0.7), (0.0, 2.7));
+        assert_eq!(super::slider_window(3.0, 1.0, 1.4), (0.0, 3.0));
+    }
+
+    #[test]
     fn range_columns_align_for_short_and_long_labels() {
         let context = eframe::egui::Context::default();
         super::theme::install(&context);
@@ -843,8 +883,14 @@ mod tests {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
                                 let left = ui.next_widget_position();
                                 let width = (ui.available_width() - 130.0).max(20.0);
+                                let (view_start, view_end) =
+                                    super::slider_window(100.0, *start, *end);
                                 handle = egui::pos2(
-                                    left.x + 7.0 + (width - 14.0) * (*start as f32 / 100.0),
+                                    left.x
+                                        + 7.0
+                                        + (width - 14.0)
+                                            * ((*start - view_start) / (view_end - view_start))
+                                                as f32,
                                     left.y + 14.0,
                                 );
                                 super::range_slider(ui, 0, 100.0, start, end);
