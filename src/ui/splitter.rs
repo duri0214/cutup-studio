@@ -53,6 +53,7 @@ pub(super) struct Splitter {
     url: String,
     downloaded: Option<tempfile::TempDir>,
     segments: Vec<AnalysisCandidate>,
+    initial_ranges: Vec<(u64, u64)>,
     reset_result_scroll: bool,
     result_ready: bool,
     duration: f64,
@@ -77,6 +78,7 @@ impl Splitter {
             self.url.clear();
             self.downloaded = None;
             self.segments.clear();
+            self.initial_ranges.clear();
             self.result_ready = false;
             self.selected = None;
             self.error = None;
@@ -103,6 +105,11 @@ impl Splitter {
             match task.try_recv() {
                 Ok(Ok((segments, downloaded, input, duration))) => {
                     self.segments = valid_segments(segments, duration);
+                    self.initial_ranges = self
+                        .segments
+                        .iter()
+                        .map(|segment| (segment.start_ms, segment.end_ms))
+                        .collect();
                     self.reset_result_scroll = true;
                     self.result_ready = true;
                     self.active_view = SplitterView::Results;
@@ -249,6 +256,7 @@ impl Splitter {
                                 self.input = None;
                                 self.downloaded = None;
                                 self.segments.clear();
+                                self.initial_ranges.clear();
                                 self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
@@ -261,6 +269,7 @@ impl Splitter {
                             {
                                 self.input = Some(path);
                                 self.segments.clear();
+                                self.initial_ranges.clear();
                                 self.result_ready = false;
                                 self.selected = None;
                                 self.error = None;
@@ -291,6 +300,7 @@ impl Splitter {
                         let (tx, rx) = mpsc::channel();
                         self.task = Some(rx);
                         self.segments.clear();
+                        self.initial_ranges.clear();
                         self.result_ready = false;
                         self.selected = None;
                         self.error = None;
@@ -321,6 +331,7 @@ impl Splitter {
                 });
                 if settings.candidate_width != previous_candidate_width {
                     self.segments.clear();
+                    self.initial_ranges.clear();
                     self.result_ready = false;
                     self.selected = None;
                     self.error = None;
@@ -374,7 +385,25 @@ impl Splitter {
                                     }
                                     let mut start = segment.start_ms as f64 / 1000.0;
                                     let mut end = segment.end_ms as f64 / 1000.0;
-                                    if range_slider(ui, index, self.duration, &mut start, &mut end).0 {
+                                    let (initial_start_ms, initial_end_ms) = self
+                                        .initial_ranges
+                                        .get(index)
+                                        .copied()
+                                        .unwrap_or((segment.start_ms, segment.end_ms));
+                                    let initial_range = (
+                                        initial_start_ms as f64 / 1000.0,
+                                        initial_end_ms as f64 / 1000.0,
+                                    );
+                                    if range_slider(
+                                        ui,
+                                        index,
+                                        self.duration,
+                                        &mut start,
+                                        &mut end,
+                                        initial_range,
+                                    )
+                                    .0
+                                    {
                                         segment.start_ms = (start * 1000.0).round() as u64;
                                         segment.end_ms = (end * 1000.0).round() as u64;
                                         self.selected = Some(index);
@@ -552,6 +581,7 @@ fn range_slider(
     duration: f64,
     start: &mut f64,
     end: &mut f64,
+    initial_range: (f64, f64),
 ) -> (bool, egui::Rect) {
     const TRAILING_WIDTH: f32 = 92.0; // Two icons, their gaps, and 16 px before the scrollbar.
     let width = (ui.available_width() - TRAILING_WIDTH).max(20.0);
@@ -562,16 +592,7 @@ fn range_slider(
     }
     let left = rect.left() + 7.0;
     let right = rect.right() - 7.0;
-    let initial_window = slider_window(duration, *start, *end);
-    let view_id = ui.id().with(("range_view", index));
-    let (view_start, view_end) = if response.dragged() || response.has_focus() {
-        ui.ctx()
-            .data(|data| data.get_temp::<[f64; 2]>(view_id))
-            .map(|window| (window[0], window[1]))
-            .unwrap_or(initial_window)
-    } else {
-        initial_window
-    };
+    let (view_start, view_end) = slider_window(duration, initial_range.0, initial_range.1);
     let view_duration = (view_end - view_start).max(f64::EPSILON);
     let x = |time: f64| {
         egui::lerp(
@@ -601,12 +622,7 @@ fn range_slider(
                 None
             }
         });
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(id, handle);
-            if handle.is_some() {
-                data.insert_temp(view_id, [view_start, view_end]);
-            }
-        });
+        ui.ctx().data_mut(|data| data.insert_temp(id, handle));
         if handle.is_some() {
             response.request_focus();
         }
@@ -716,6 +732,17 @@ mod tests {
         use eframe::egui::Context;
         use std::sync::mpsc;
 
+        let candidate = crate::domain::valueobject::catalog::AnalysisCandidate {
+            text: "猫".into(),
+            original_text: None,
+            language: None,
+            start_ms: 100,
+            end_ms: 200,
+            model: String::new(),
+            model_version: String::new(),
+            confidence: None,
+            evidence: None,
+        };
         let (sender, receiver) = mpsc::channel();
         let mut splitter = super::Splitter {
             open: true,
@@ -723,13 +750,14 @@ mod tests {
             ..Default::default()
         };
         sender
-            .send(Ok((Vec::new(), None, "input.wav".into(), 1.0)))
+            .send(Ok((vec![candidate], None, "input.wav".into(), 1.0)))
             .expect("the analysis receiver should still be open");
 
         splitter.poll(&Context::default());
 
         assert!(splitter.active_view == super::SplitterView::Results);
-        assert_eq!(splitter.result_count(), Some(0));
+        assert_eq!(splitter.result_count(), Some(1));
+        assert_eq!(splitter.initial_ranges, [(100, 200)]);
     }
 
     #[test]
@@ -868,7 +896,14 @@ mod tests {
                                     ui.horizontal(|ui| {
                                         super::segment_label(ui, "example", false, 150.0);
                                         let (mut start, mut end) = (20.0, 40.0);
-                                        super::range_slider(ui, index, 100.0, &mut start, &mut end);
+                                        super::range_slider(
+                                            ui,
+                                            index,
+                                            100.0,
+                                            &mut start,
+                                            &mut end,
+                                            (20.0, 40.0),
+                                        );
                                         super::theme::icon_button(
                                             ui,
                                             super::theme::ActionIcon::Play,
@@ -938,12 +973,9 @@ mod tests {
                             ui.horizontal(|ui| {
                                 ui.add_sized([150.0, 28.0], egui::Label::new("sample"));
                                 let (_, slider_rect) =
-                                    super::range_slider(ui, 0, 100.0, start, end);
-                                let view_id = ui.id().with(("range_view", 0));
-                                let (view_start, view_end) = ctx
-                                    .data(|data| data.get_temp::<[f64; 2]>(view_id))
-                                    .map(|window| (window[0], window[1]))
-                                    .unwrap_or_else(|| super::slider_window(100.0, *start, *end));
+                                    super::range_slider(ui, 0, 100.0, start, end, (20.0, 40.0));
+                                let (view_start, view_end) =
+                                    super::slider_window(100.0, 20.0, 40.0);
                                 let left = slider_rect.left() + 7.0;
                                 let right = slider_rect.right() - 7.0;
                                 let handle_x = |value: f64| {
