@@ -340,7 +340,13 @@ impl Splitter {
                 let mut action = None;
                 ui.add_enabled_ui(!busy, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("文字起こし結果");
+                        ui.label(format!(
+                            "文字起こし結果（{}）",
+                            match settings.candidate_width {
+                                CandidateWidth::Standard => "標準",
+                                CandidateWidth::Wide => "広め",
+                            }
+                        ));
                         ui.label(theme::detail_muted("各候補の前後2秒を拡大表示"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if theme::button(ui, "すべて保存", theme::ButtonKind::Primary).clicked() {
