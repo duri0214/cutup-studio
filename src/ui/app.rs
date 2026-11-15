@@ -1383,7 +1383,9 @@ fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) 
         ui.set_min_height(38.0);
         ui.label(theme::section_title(title));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            theme::traffic_light(ui, signal).on_hover_text(detail);
+            ui.push_id(title, |ui| {
+                theme::traffic_light(ui, signal, detail).on_hover_text(detail)
+            });
         });
     });
 }

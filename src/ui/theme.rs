@@ -285,8 +285,35 @@ pub fn progress_message(ui: &mut Ui, text: &str) {
     });
 }
 
-pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
+pub fn traffic_light(ui: &mut Ui, active: State, detail: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
+    let id = ui.id().with("traffic_light_animation");
+    let now = ui.input(|input| input.time);
+    let previous = ui
+        .ctx()
+        .data(|data| data.get_temp::<(State, String, f64)>(id));
+    let started = match previous {
+        Some((state, old_detail, _))
+            if active == State::Error && (state != active || old_detail != detail) =>
+        {
+            now
+        }
+        Some((_, _, started)) => started,
+        None if active == State::Error => now,
+        None => -1.0,
+    };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(id, (active, detail.to_owned(), started)));
+    let elapsed = (now - started) as f32;
+    let animating = active == State::Error && (0.0..0.55).contains(&elapsed);
+    let offset = if animating {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
+        (elapsed * 45.0).sin() * 4.0 * (1.0 - elapsed / 0.55)
+    } else {
+        0.0
+    };
+    let rect = rect.translate(Vec2::new(offset, 0.0));
     ui.painter()
         .rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), TRAFFIC_BACKGROUND);
     ui.painter().rect_stroke(
@@ -301,7 +328,16 @@ pub fn traffic_light(ui: &mut Ui, active: State) -> Response {
         (State::Ready, 30.0),
     ] {
         let color = if state == active {
-            state_color(state)
+            if state == State::Error && animating && elapsed < 0.18 {
+                let mix = (elapsed / 0.18).clamp(0.0, 1.0);
+                Color32::from_rgb(
+                    (255.0 + (f32::from(RED.r()) - 255.0) * mix) as u8,
+                    (255.0 + (f32::from(RED.g()) - 255.0) * mix) as u8,
+                    (255.0 + (f32::from(RED.b()) - 255.0) * mix) as u8,
+                )
+            } else {
+                state_color(state)
+            }
         } else {
             state_color(state).gamma_multiply(0.18)
         };
