@@ -208,17 +208,23 @@ pub fn section_title(text: impl Into<String>) -> RichText {
 }
 
 pub fn pane_title(ui: &mut Ui, text: &str) {
-    let vertical_padding =
-        ((INPUT_HEIGHT - ui.text_style_height(&egui::TextStyle::Body)) / 2.0).round() as i8;
-    let title = Frame::new()
-        .inner_margin(egui::Margin {
-            left: SPACE_LG as i8,
-            right: SPACE_LG as i8,
-            top: vertical_padding,
-            bottom: vertical_padding,
-        })
-        .show(ui, |ui| ui.label(section_title(text).color(ACCENT)));
-    let rect = title.response.rect;
+    let font = FontId::proportional(TAB_TEXT_SIZE);
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), ACCENT)
+        .size()
+        .x;
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(text_width + SPACE_LG * 2.0, INPUT_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter().text(
+        Pos2::new(rect.left() + SPACE_LG, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        font,
+        ACCENT,
+    );
     let y = rect.bottom() - 1.0;
     ui.painter().line_segment(
         [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
