@@ -285,25 +285,36 @@ pub fn progress_message(ui: &mut Ui, text: &str) {
     });
 }
 
-pub fn traffic_light(ui: &mut Ui, active: State, detail: &str) -> Response {
+fn error_animation_start(
+    previous: Option<(State, String, u64, f64)>,
+    active: State,
+    detail: &str,
+    attempt: u64,
+    now: f64,
+) -> f64 {
+    match previous {
+        Some((state, old_detail, old_attempt, _))
+            if active == State::Error
+                && (state != active || old_detail != detail || old_attempt != attempt) =>
+        {
+            now
+        }
+        Some((_, _, _, started)) => started,
+        None if active == State::Error => now,
+        None => -1.0,
+    }
+}
+
+pub fn traffic_light(ui: &mut Ui, active: State, detail: &str, attempt: u64) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(18.0, 38.0), Sense::hover());
     let id = ui.id().with("traffic_light_animation");
     let now = ui.input(|input| input.time);
     let previous = ui
         .ctx()
-        .data(|data| data.get_temp::<(State, String, f64)>(id));
-    let started = match previous {
-        Some((state, old_detail, _))
-            if active == State::Error && (state != active || old_detail != detail) =>
-        {
-            now
-        }
-        Some((_, _, started)) => started,
-        None if active == State::Error => now,
-        None => -1.0,
-    };
+        .data(|data| data.get_temp::<(State, String, u64, f64)>(id));
+    let started = error_animation_start(previous, active, detail, attempt, now);
     ui.ctx()
-        .data_mut(|data| data.insert_temp(id, (active, detail.to_owned(), started)));
+        .data_mut(|data| data.insert_temp(id, (active, detail.to_owned(), attempt, started)));
     let elapsed = (now - started) as f32;
     let animating = active == State::Error && (0.0..0.55).contains(&elapsed);
     let offset = if animating {
@@ -806,6 +817,23 @@ fn action_icon_image(icon: ActionIcon) -> egui::Image<'static> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repeated_error_animates_only_when_a_new_attempt_occurs() {
+        use super::{State, error_animation_start};
+        let previous = Some((State::Error, "古い形式".to_owned(), 1, 10.0));
+        assert_eq!(
+            error_animation_start(previous.clone(), State::Error, "古い形式", 1, 20.0),
+            10.0
+        );
+        assert_eq!(
+            error_animation_start(previous, State::Error, "古い形式", 2, 20.0),
+            20.0
+        );
+        assert_eq!(
+            error_animation_start(None, State::Attention, "未設定", 0, 20.0),
+            -1.0
+        );
+    }
     use eframe::egui;
 
     #[test]

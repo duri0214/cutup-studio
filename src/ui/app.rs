@@ -52,6 +52,7 @@ pub struct StudioApp {
     editor: Option<CatalogEditor>,
     editor_settings: EditorSettings,
     catalog_task: Option<CatalogTask>,
+    catalog_attempt: u64,
     guide_inputs: Vec<GuideInput>,
     plan: Option<Plan>,
     selections: BTreeMap<String, Candidate>,
@@ -82,6 +83,7 @@ impl StudioApp {
             editor: None,
             editor_settings,
             catalog_task: None,
+            catalog_attempt: 0,
             guide_inputs: Vec::new(),
             plan: None,
             selections: BTreeMap::new(),
@@ -105,6 +107,7 @@ impl StudioApp {
         else {
             return;
         };
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => self.start_catalog_task(path, None, context),
@@ -142,6 +145,7 @@ impl StudioApp {
     }
 
     fn use_demo_catalog(&mut self, context: &egui::Context) {
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let root = demo_material_root();
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
@@ -167,6 +171,7 @@ impl StudioApp {
         else {
             return;
         };
+        self.catalog_attempt = self.catalog_attempt.wrapping_add(1);
         let path = root.join("material-catalog.sqlite");
         match path.try_exists() {
             Ok(true) => {
@@ -547,7 +552,7 @@ impl StudioApp {
                     editor.open = true;
                 }
             }
-            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status);
+            section_header(ui, "01 / MATERIAL CATALOG", signal, &self.status, self.catalog_attempt);
             ui.label(theme::detail_muted(
                 "基準フォルダには materials/ と material-catalog.sqlite が必要です。",
             ));
@@ -665,7 +670,7 @@ impl StudioApp {
             if theme::section_tab(ui, "02 の候補を表示", self.active_section == Section::Guide, 150.0).clicked() {
                 self.active_section = Section::Guide;
             }
-            section_header(ui, "02 / COMPOSITION GUIDE", signal, status);
+            section_header(ui, "02 / COMPOSITION GUIDE", signal, status, 0);
             if self.status.starts_with("RELATED ERROR") {
                 theme::state_message(ui, theme::State::Error, &self.status);
             }
@@ -810,6 +815,7 @@ impl StudioApp {
                 "02 / CANDIDATES",
                 theme::State::Ready,
                 "02 / COMPOSITION GUIDE の候補",
+                0,
             );
             self.show_candidates(ui);
         });
@@ -1378,13 +1384,13 @@ fn same_composition(a: Option<&CompositionRecipe>, b: Option<&CompositionRecipe>
     }
 }
 
-fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str) {
+fn section_header(ui: &mut Ui, title: &str, signal: theme::State, detail: &str, attempt: u64) {
     ui.horizontal(|ui| {
         ui.set_min_height(38.0);
         ui.label(theme::section_title(title));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.push_id(title, |ui| {
-                theme::traffic_light(ui, signal, detail).on_hover_text(detail)
+                theme::traffic_light(ui, signal, detail, attempt).on_hover_text(detail)
             });
         });
     });
@@ -1456,6 +1462,7 @@ mod tests {
             editor: None,
             editor_settings: EditorSettings::default(),
             catalog_task: None,
+            catalog_attempt: 0,
             guide_inputs: vec![],
             plan: Some(Plan {
                 slots: vec![SlotPlan {
